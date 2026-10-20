@@ -1,0 +1,15 @@
+# GitLab Agent: какие группы видят рабочий кластер из CI и UI.
+user_access:
+  access_as:
+    agent: {}
+  groups:
+    - id: platform
+    - id: apps
+    - id: web
+    - id: analytics
+ci_access:
+  groups:
+    - id: platform
+    - id: apps
+    - id: web
+    - id: analytics

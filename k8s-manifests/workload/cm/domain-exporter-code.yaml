@@ -1,0 +1,472 @@
+# RDAP/WHOIS exporter. Список: Technitium apex-зоны + extras в cm/domain-exporter.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: domain-exporter-code
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: domain-exporter
+data:
+  exporter.py: |
+    #!/usr/bin/env python3
+    """Domain registration expiry exporter (RDAP + WHOIS). Stdlib only.
+    
+    Domain list = apex zones from Technitium + optional extras in domains.yaml.
+    """
+    from __future__ import annotations
+    
+    import json
+    import os
+    import re
+    import socket
+    import threading
+    import time
+    import urllib.error
+    import urllib.request
+    from datetime import datetime, timezone
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from typing import Any
+    
+    LISTEN = os.environ.get("LISTEN", ":9222")
+    CONFIG = os.environ.get("CONFIG", "/config/domains.yaml")
+    CACHE_TTL = int(os.environ.get("CACHE_TTL_SECONDS", "3600"))
+    # A failed lookup keeps the last good expiry so alerts do not resolve and fire again.
+    STALE_KEEP = int(os.environ.get("STALE_KEEP_SECONDS", "10800"))
+    HTTP_TIMEOUT = float(os.environ.get("HTTP_TIMEOUT_SECONDS", "15"))
+    WHOIS_TIMEOUT = float(os.environ.get("WHOIS_TIMEOUT_SECONDS", "15"))
+    TECHNITIUM_URLS = [
+        u.strip().rstrip("/")
+        for u in os.environ.get(
+            "TECHNITIUM_URLS",
+            "http://dns-1.corp.example:5380,http://dns-2.corp.example:5380",
+        ).split(",")
+        if u.strip()
+    ]
+    TECHNITIUM_TOKEN = os.environ.get("TECHNITIUM_TOKEN", "")
+    LIST_REFRESH = int(os.environ.get("LIST_REFRESH_SECONDS", "300"))
+    PROBE_GAP = float(os.environ.get("PROBE_GAP_SECONDS", "0.4"))
+    
+    # Prefer paid-till / Registry Expiry — never match bare "registered"
+    # (RU WHOIS "state: REGISTERED, DELEGATED…" breaks generic parsers).
+    EXPIRY_KEYS = (
+        "paid-till",
+        "Registry Expiry Date",
+        "Registrar Registration Expiration Date",
+        "Expiration Date",
+        "Expiry Date",
+        "expire-date",
+        "Expires On",
+        "expires",
+    )
+    
+    DATE_FORMATS = (
+        "%Y-%m-%dT%H:%M:%S.%fZ",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+        "%Y.%m.%d",
+        "%d-%b-%Y",
+    )
+    
+    WHOIS_SERVERS = {
+        "ru": "whois.tcinet.ru",
+        "su": "whois.tcinet.ru",
+        "xn--p1ai": "whois.tcinet.ru",
+    }
+    
+    # Multi-label public suffixes we actually use. Default apex = last 2 labels.
+    MULTI_SUFFIXES = (
+        "com.ru",
+        "net.ru",
+        "org.ru",
+        "pp.ru",
+        "spb.ru",
+        "msk.ru",
+        "co.uk",
+        "com.au",
+    )
+    
+    SKIP_ZONE_TYPES = {"catalog", "stub", "forwarder", "secondaryforwarder"}
+    SKIP_SUFFIXES = (".arpa", ".local", ".internal", ".lan")
+    
+    _lock = threading.Lock()
+    _cache: dict[str, tuple[float, dict[str, Any]]] = {}
+    _domains: list[str] = []
+    _technitium_up = 0
+    _list_error = ""
+    
+    
+    def _parse_yaml_list(text: str, key: str) -> list[str]:
+        items: list[str] = []
+        in_key = False
+        for raw in text.splitlines():
+            line = raw.split("#", 1)[0].rstrip()
+            if not line.strip():
+                continue
+            if re.match(rf"^{re.escape(key)}\s*:\s*$", line):
+                in_key = True
+                continue
+            if re.match(rf"^{re.escape(key)}\s*:\s*\[\]\s*$", line):
+                return []
+            if not in_key:
+                continue
+            if re.match(r"^[A-Za-z0-9_-]+\s*:", line) and not line.strip().startswith("-"):
+                break
+            m = re.match(r"^\s*-\s*(.+?)\s*$", line)
+            if not m:
+                continue
+            item = m.group(1).strip().strip("\"'")
+            if item.startswith("name:"):
+                item = item.split(":", 1)[1].strip().strip("\"'")
+            if item and item not in ("[]", "{}", "null"):
+                items.append(item.lower().rstrip("."))
+        return items
+    
+    
+    def load_extra_domains() -> tuple[list[str], set[str]]:
+        try:
+            with open(CONFIG, "r", encoding="utf-8") as fh:
+                text = fh.read()
+        except FileNotFoundError:
+            return [], set()
+        extras = _parse_yaml_list(text, "domains")
+        exclude = set(_parse_yaml_list(text, "exclude"))
+        return extras, exclude
+    
+    
+    def apex_of(name: str) -> str | None:
+        name = name.lower().rstrip(".")
+        if not name or name == ".":
+            return None
+        if any(name.endswith(suf) for suf in SKIP_SUFFIXES) or name in {"arpa", "local"}:
+            return None
+        labels = name.split(".")
+        if len(labels) < 2:
+            return None
+        for suf in MULTI_SUFFIXES:
+            suf_labels = suf.split(".")
+            if len(labels) >= len(suf_labels) + 1 and labels[-len(suf_labels) :] == suf_labels:
+                return ".".join(labels[-(len(suf_labels) + 1) :])
+        return ".".join(labels[-2:])
+    
+    
+    def zone_is_disabled(zone: dict[str, Any]) -> bool:
+        value = zone.get("disabled", zone.get("isDisabled", zone.get("Disabled")))
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+    
+    
+    def zones_from_technitium() -> list[str]:
+        if not TECHNITIUM_TOKEN:
+            raise RuntimeError("TECHNITIUM_TOKEN is empty")
+        last_err: Exception | None = None
+        for base in TECHNITIUM_URLS:
+            url = f"{base}/api/zones/list"
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "Authorization": f"Bearer {TECHNITIUM_TOKEN}",
+                    "User-Agent": "domain-exporter/1.0",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+                    payload = json.load(resp)
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                continue
+            if payload.get("status") != "ok":
+                last_err = RuntimeError(f"{base}: {payload.get('errorMessage') or payload.get('status')}")
+                continue
+            enabled: set[str] = set()
+            disabled_apex: set[str] = set()
+            for zone in (payload.get("response") or {}).get("zones") or []:
+                ztype = str(zone.get("type") or "").lower()
+                if ztype in SKIP_ZONE_TYPES:
+                    continue
+                raw = str(zone.get("name") or "").lower().rstrip(".")
+                apex = apex_of(raw)
+                if not apex:
+                    continue
+                # Disabled zone must not contribute, and a disabled apex
+                # zone must not reappear via an enabled subdomain.
+                if zone_is_disabled(zone):
+                    if raw == apex:
+                        disabled_apex.add(apex)
+                    continue
+                enabled.add(apex)
+            return sorted(enabled - disabled_apex)
+        raise RuntimeError(f"technitium zones/list failed: {last_err}")
+    
+    
+    def refresh_domain_list() -> None:
+        global _domains, _technitium_up, _list_error
+        extras, exclude = load_extra_domains()
+        tech: list[str] = []
+        try:
+            tech = zones_from_technitium()
+            up, err = 1, ""
+        except Exception as exc:  # noqa: BLE001
+            up, err = 0, str(exc)[:300]
+            print(f"technitium list failed: {exc}", flush=True)
+        merged = []
+        seen: set[str] = set()
+        for name in tech + extras:
+            apex = apex_of(name) or name.lower().rstrip(".")
+            if not apex or apex in seen or apex in exclude:
+                continue
+            seen.add(apex)
+            merged.append(apex)
+        with _lock:
+            _technitium_up = up
+            _list_error = err
+            if merged or up:
+                _domains = merged
+            # if Technitium failed keep previous _domains (and extras if first run)
+            elif extras and not _domains:
+                _domains = [d for d in extras if d not in exclude]
+    
+    
+    def parse_date(value: str) -> datetime | None:
+        value = value.strip().strip(".")
+        if not value:
+            return None
+        candidates = [value]
+        if value.endswith("Z") and "." in value:
+            head, frac = value[:-1].split(".", 1)
+            candidates.append(f"{head}.{frac[:6]}Z")
+        for cand in candidates:
+            for fmt in DATE_FORMATS:
+                try:
+                    dt = datetime.strptime(cand, fmt)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.astimezone(timezone.utc)
+                except ValueError:
+                    continue
+        return None
+    
+    
+    def whois_query(domain: str, host: str) -> str:
+        with socket.create_connection((host, 43), timeout=WHOIS_TIMEOUT) as sock:
+            sock.sendall(f"{domain}\r\n".encode("ascii", "ignore"))
+            chunks: list[bytes] = []
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        return b"".join(chunks).decode("utf-8", "replace")
+    
+    
+    def expiry_from_whois(domain: str) -> tuple[datetime, str]:
+        tld = domain.rsplit(".", 1)[-1]
+        hosts: list[str] = []
+        if tld in WHOIS_SERVERS:
+            hosts.append(WHOIS_SERVERS[tld])
+        hosts.append("whois.iana.org")
+        last_err: Exception | None = None
+        for host in hosts:
+            try:
+                body = whois_query(domain, host)
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                continue
+            m_refer = re.search(r"(?im)^(?:refer|whois)\s*:\s*(\S+)", body)
+            if host == "whois.iana.org" and m_refer:
+                try:
+                    body = whois_query(domain, m_refer.group(1).strip())
+                except Exception as exc:  # noqa: BLE001
+                    last_err = exc
+                    continue
+            for key in EXPIRY_KEYS:
+                m = re.search(rf"(?im)^\s*{re.escape(key)}\s*:\s*(.+?)\s*$", body)
+                if not m:
+                    continue
+                dt = parse_date(m.group(1))
+                if dt:
+                    return dt, f"whois:{host}"
+            last_err = RuntimeError(f"no expiry field in whois from {host}")
+        raise RuntimeError(f"whois failed for {domain}: {last_err}")
+    
+    
+    def expiry_from_rdap(domain: str) -> tuple[datetime, str]:
+        urls = [
+            f"https://rdap.org/domain/{domain}",
+            f"https://rdap.nic.ru/domain/{domain}",
+        ]
+        tld = domain.rsplit(".", 1)[-1]
+        if tld not in ("ru", "su", "xn--p1ai"):
+            urls.insert(0, f"https://rdap.identitydigital.services/rdap/domain/{domain}")
+        last_err: Exception | None = None
+        for url in urls:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "Accept": "application/rdap+json",
+                    "User-Agent": "domain-exporter/1.0",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+                    payload = json.load(resp)
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                continue
+            for event in payload.get("events") or []:
+                if event.get("eventAction") == "expiration":
+                    dt = parse_date(str(event.get("eventDate") or ""))
+                    if dt:
+                        return dt, f"rdap:{url.split('/')[2]}"
+            last_err = RuntimeError(f"no expiration event in {url}")
+        raise RuntimeError(f"rdap failed for {domain}: {last_err}")
+    
+    
+    def probe_domain(domain: str) -> dict[str, Any]:
+        started = time.time()
+        for fn in (expiry_from_rdap, expiry_from_whois):
+            try:
+                expiry, source = fn(domain)
+                days = int((expiry - datetime.now(timezone.utc)).total_seconds() // 86400)
+                return {
+                    "success": 1,
+                    "expiry_ts": expiry.timestamp(),
+                    "expiry_days": days,
+                    "source": source,
+                    "duration": time.time() - started,
+                }
+            except Exception:  # noqa: BLE001
+                continue
+        return {
+            "success": 0,
+            "expiry_ts": 0,
+            "expiry_days": 0,
+            "source": "none",
+            "duration": time.time() - started,
+        }
+    
+    
+    def get_result(domain: str) -> dict[str, Any]:
+        now = time.time()
+        with _lock:
+            cached = _cache.get(domain)
+            if cached and now - cached[0] < CACHE_TTL:
+                return cached[1]
+        result = probe_domain(domain)
+        with _lock:
+            prev = _cache.get(domain)
+            if result["success"] == 1:
+                result["_ok_at"] = now
+            elif prev and prev[1].get("success") == 1:
+                origin = float(prev[1].get("_ok_at", prev[0]))
+                if now - origin < STALE_KEEP:
+                    kept = dict(prev[1])
+                    kept["duration"] = result["duration"]
+                    kept["_ok_at"] = origin
+                    _cache[domain] = (now, kept)
+                    return kept
+            _cache[domain] = (now, result)
+        return result
+    
+    
+    def esc(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+    
+    
+    def render_metrics() -> bytes:
+        with _lock:
+            domains = list(_domains)
+            tech_up = _technitium_up
+        lines = [
+            "# HELP domain_expiry_days Days until domain registration expires (floor).",
+            "# TYPE domain_expiry_days gauge",
+            "# HELP domain_expiry_timestamp_seconds Unix timestamp of domain expiry.",
+            "# TYPE domain_expiry_timestamp_seconds gauge",
+            "# HELP domain_probe_success 1 if expiry lookup succeeded.",
+            "# TYPE domain_probe_success gauge",
+            "# HELP domain_probe_duration_seconds Domain probe duration.",
+            "# TYPE domain_probe_duration_seconds gauge",
+            "# HELP domain_probe_source Info metric with lookup source label.",
+            "# TYPE domain_probe_source gauge",
+            "# HELP domain_technitium_up 1 if Technitium zone list was fetched.",
+            "# TYPE domain_technitium_up gauge",
+            "# HELP domain_listed Number of apex domains currently probed.",
+            "# TYPE domain_listed gauge",
+            f"domain_technitium_up {tech_up}",
+            f"domain_listed {len(domains)}",
+        ]
+        for domain in domains:
+            # Never probe here. A cache refresh does RDAP/WHOIS for every
+            # domain and blows the 25s scrape timeout, which flaps up and alerts.
+            with _lock:
+                cached = _cache.get(domain)
+                r = dict(cached[1]) if cached else None
+            if r is None:
+                continue
+            d = esc(domain)
+            src = esc(str(r["source"]))
+            lines.append(f'domain_expiry_days{{domain="{d}"}} {r["expiry_days"]}')
+            lines.append(f'domain_expiry_timestamp_seconds{{domain="{d}"}} {r["expiry_ts"]:.0f}')
+            lines.append(f'domain_probe_success{{domain="{d}"}} {r["success"]}')
+            lines.append(f'domain_probe_duration_seconds{{domain="{d}"}} {r["duration"]:.6f}')
+            lines.append(f'domain_probe_source{{domain="{d}",source="{src}"}} 1')
+        lines.append("")
+        return ("\n".join(lines)).encode("utf-8")
+    
+    
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, fmt: str, *args: Any) -> None:
+            return
+    
+        def do_GET(self) -> None:  # noqa: N802
+            path = self.path.split("?", 1)[0]
+            if path in ("/metrics", "/metrics/"):
+                body = render_metrics()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if path in ("/", "/healthz"):
+                body = b"ok\n"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(404)
+            self.end_headers()
+    
+    
+    def refresher() -> None:
+        while True:
+            refresh_domain_list()
+            with _lock:
+                domains = list(_domains)
+            print(f"domain list ({len(domains)}): {domains}", flush=True)
+            for domain in domains:
+                get_result(domain)
+                time.sleep(PROBE_GAP)
+            time.sleep(max(60, LIST_REFRESH))
+    
+    
+    def main() -> None:
+        refresh_domain_list()
+        host, _, port_s = LISTEN.rpartition(":")
+        host = host.strip("[]") or "0.0.0.0"
+        port = int(port_s)
+        threading.Thread(target=refresher, daemon=True).start()
+        httpd = ThreadingHTTPServer((host, port), Handler)
+        with _lock:
+            domains = list(_domains)
+        print(f"domain-exporter listening on {host}:{port}, domains={domains}", flush=True)
+        httpd.serve_forever()
+    
+    
+    if __name__ == "__main__":
+        main()

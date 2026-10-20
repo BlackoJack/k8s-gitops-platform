@@ -1,0 +1,116 @@
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: redis
+  namespace: monitoring
+spec:
+  groups:
+    - name: redis
+      rules:
+        - alert: RedisDown
+          expr: redis_up{namespace=~"redis-staging|redis-production"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis {{ $labels.pod }} ({{ $labels.namespace }}) недоступен"
+            description: "Redis {{ $labels.pod }} не отвечает (redis_up=0) более 1 минуты."
+
+        - alert: RedisNoMaster
+          expr: count by (namespace) (redis_instance_info{namespace=~"redis-staging|redis-production",role="master"} == 1) != 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis {{ $labels.namespace }}: нет единственного master"
+            description: "Ожидается ровно один master в {{ $labels.namespace }}. Сейчас иначе — failover сломан или сплит."
+
+        - alert: RedisMemoryHigh
+          expr: |
+            (
+              redis_memory_used_bytes{namespace=~"redis-staging|redis-production"}
+              / redis_config_maxmemory{namespace=~"redis-staging|redis-production"} * 100 > 80
+            )
+            and redis_config_maxmemory{namespace=~"redis-staging|redis-production"} > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis {{ $labels.pod }}: память {{ $value | printf \"%.0f\" }}% от maxmemory"
+            description: "Более 80% maxmemory. Дальше начнётся eviction."
+
+        - alert: RedisMemoryCritical
+          expr: |
+            (
+              redis_memory_used_bytes{namespace=~"redis-staging|redis-production"}
+              / redis_config_maxmemory{namespace=~"redis-staging|redis-production"} * 100 > 90
+            )
+            and redis_config_maxmemory{namespace=~"redis-staging|redis-production"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis {{ $labels.pod }}: память {{ $value | printf \"%.0f\" }}%"
+            description: "Более 90% maxmemory. Eviction неизбежен."
+
+        - alert: RedisKeyEviction
+          expr: increase(redis_evicted_keys_total{namespace=~"redis-staging|redis-production"}[5m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis {{ $labels.pod }}: eviction ключей"
+            description: "Evicted за 5 минут: {{ $value }}. Увеличьте maxmemory или уменьшите данные."
+
+        - alert: RedisRejectedConnections
+          expr: increase(redis_rejected_connections_total{namespace=~"redis-staging|redis-production"}[5m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis {{ $labels.pod }} отклоняет подключения"
+            description: "Достигнут maxclients."
+
+        - alert: RedisAOFWriteFailed
+          expr: redis_aof_last_write_status{namespace=~"redis-staging|redis-production"} != 1
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis {{ $labels.pod }}: AOF write failed"
+            description: "AOF не пишется. При рестарте возможна потеря данных."
+
+        - alert: RedisReplicationBroken
+          expr: |
+            (
+              redis_connected_slaves{namespace=~"redis-staging|redis-production"}
+              * on (cluster, namespace, pod) group_left ()
+                redis_instance_info{namespace=~"redis-staging|redis-production", role="master"}
+            ) < 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis master {{ $labels.namespace }} без двух replica"
+            description: "У master меньше 2 replica. Отказоустойчивость Sentinel снижена."
+
+        - alert: RedisTooManyConnections
+          expr: |
+            redis_connected_clients{namespace=~"redis-staging|redis-production"}
+            / redis_config_maxclients{namespace=~"redis-staging|redis-production"} * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis {{ $labels.pod }}: {{ $value | printf \"%.0f\" }}% от maxclients"
+            description: "Больше 80% maxclients. Проверьте connection pooling."
+
+        - alert: RedisRDBBgsaveFailed
+          expr: redis_rdb_last_bgsave_status{namespace=~"redis-staging|redis-production"} != 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis {{ $labels.pod }}: RDB bgsave failed"
+            description: "Фоновый RDB snapshot не удался. Проверьте диск и память для fork."

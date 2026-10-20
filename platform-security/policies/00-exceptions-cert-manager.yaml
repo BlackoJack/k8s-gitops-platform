@@ -1,0 +1,101 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/kyverno.io/policyexception_v2.json
+# Selectel/Technitium DNS-01 webhooks: charts have no securityContext hook and
+# bind :443 as root. Forcing runAsNonRoot without NET_BIND_SERVICE would break
+# ACME. Jetstack cert-manager itself already meets Restricted.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: cert-manager-webhooks-restricted
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: pod-security-restricted
+      ruleNames:
+        - restricted
+        - autogen-restricted
+        - autogen-cronjob-restricted
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - Deployment
+            - ReplicaSet
+          namespaces:
+            - cert-manager
+  podSecurity:
+    - controlName: Running as Non-root
+      images:
+        - "ghcr.io/selectel/cert-manager-webhook-selectel:*"
+        - "kittiza/cert-manager-technitium-webhook:*"
+        - "docker.io/kittiza/cert-manager-technitium-webhook:*"
+    - controlName: Running as Non-root user
+      images:
+        - "ghcr.io/selectel/cert-manager-webhook-selectel:*"
+        - "kittiza/cert-manager-technitium-webhook:*"
+        - "docker.io/kittiza/cert-manager-technitium-webhook:*"
+    - controlName: Privilege Escalation
+      images:
+        - "ghcr.io/selectel/cert-manager-webhook-selectel:*"
+        - "kittiza/cert-manager-technitium-webhook:*"
+        - "docker.io/kittiza/cert-manager-technitium-webhook:*"
+    - controlName: Capabilities
+      images:
+        - "ghcr.io/selectel/cert-manager-webhook-selectel:*"
+        - "kittiza/cert-manager-technitium-webhook:*"
+        - "docker.io/kittiza/cert-manager-technitium-webhook:*"
+    - controlName: Seccomp
+      images:
+        - "ghcr.io/selectel/cert-manager-webhook-selectel:*"
+        - "kittiza/cert-manager-technitium-webhook:*"
+        - "docker.io/kittiza/cert-manager-technitium-webhook:*"
+---
+# Chart only publishes :latest (image: repo:tag, no digest field).
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: cert-manager-technitium-latest
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: disallow-latest-tag
+      ruleNames:
+        - validate-image-tag
+        - autogen-validate-image-tag
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - Deployment
+            - ReplicaSet
+          namespaces:
+            - cert-manager
+          names:
+            - cert-manager-technitium-webhook*
+---
+# Controller has liveness but no chart knob for readiness. Cainjector has neither.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: cert-manager-probes
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: require-probes
+      ruleNames:
+        - validate-probes
+  match:
+    any:
+      - resources:
+          kinds:
+            - Deployment
+          namespaces:
+            - cert-manager
+          names:
+            - cert-manager-cert-manager
+            - cert-manager-cert-manager-cainjector
+

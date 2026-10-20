@@ -1,0 +1,27 @@
+# Certificate expiry/ready metrics come from the controller (:9402).
+# Chart ServiceMonitor is off; prometheus.enabled only exposes the port.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: cert-manager
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - cert-manager
+  selector:
+    matchLabels:
+      # Helm instance is cert-manager-cert-manager, not the HelmRelease name.
+      app.kubernetes.io/name: cert-manager
+      app.kubernetes.io/component: controller
+  podMetricsEndpoints:
+    - port: http-metrics
+      path: /metrics
+      interval: 30s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: cert-manager
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

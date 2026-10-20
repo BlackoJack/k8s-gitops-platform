@@ -1,0 +1,27 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: flux
+  namespace: monitoring
+spec:
+  groups:
+    - name: flux
+      rules:
+        - alert: FluxReconciliationFailed
+          expr: |
+            gotk_reconcile_condition{type="Ready",status="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Flux {{ $labels.kind }}/{{ $labels.name }} не Ready"
+            description: "Ресурс {{ $labels.name }} не реконсилится 15+ минут на кластере {{ $labels.cluster }}."
+        - alert: FluxHelmReleaseFailed
+          expr: |
+            gotk_reconcile_condition{kind="HelmRelease",type="Ready",status="False"} == 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "HelmRelease {{ $labels.name }} failed"
+            description: "HelmRelease {{ $labels.name }} в статусе not Ready на {{ $labels.cluster }}."

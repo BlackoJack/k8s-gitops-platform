@@ -1,0 +1,96 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: pass-storage
+  namespace: pass-storage
+spec:
+  interval: 10m
+  chartRef:
+    kind: OCIRepository
+    name: pass-storage
+    namespace: flux-system
+  install:
+    timeout: 2m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 2m
+    remediation:
+      retries: 3
+  values:
+    image:
+      repository: registry.corp.example/platform/pass/pass-storage
+      tag: "4.2.1"
+      pullPolicy: IfNotPresent
+    imagePullSecrets:
+      - name: pass-storage-secret
+    # Chart default fsGroup: 1000 makes kubelet chmod PVC files to 660
+    # (OR 0660 / dirs 2770). symmetric-encryption then refuses the key
+    # files (wants 600/400). ha-nfs already has mountPermissions 0777;
+    # uid 1000 owns the files, fsGroup is not needed and fights the gem.
+    podSecurityContext:
+      fsGroup: null
+      runAsUser: 1000
+      runAsGroup: 1000
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    nodeSelector:
+      environment: infra
+    tolerations:
+      - key: "environment"
+        operator: "Equal"
+        value: "infra"
+        effect: "PreferNoSchedule"
+    # Rails force_ssl 301s HTTP /up to HTTPS; kubelet follows it and the
+    # probe then hits Thruster with TLS on a cleartext port.
+    startupProbe:
+      httpGet:
+        path: /up
+        port: http
+        httpHeaders:
+          - name: X-Forwarded-Proto
+            value: https
+    livenessProbe:
+      httpGet:
+        path: /up
+        port: http
+        httpHeaders:
+          - name: X-Forwarded-Proto
+            value: https
+    readinessProbe:
+      httpGet:
+        path: /up
+        port: http
+        httpHeaders:
+          - name: X-Forwarded-Proto
+            value: https
+    config:
+      RAILS_ENV: production
+      DB_HOST: postgres.corp.example
+      DB_PORT: "5432"
+      DB_USERNAME: pass_storage
+      SYMMETRIC_ENCRYPTION_CONFIG: "/rails/symmetric/symmetric-encryption.yml"
+    secret:
+      DB_PASSWORD: "REDACTED"
+      RAILS_MASTER_KEY: "REDACTED"
+    ingress:
+      enabled: true
+      className: nginx
+      hosts:
+        - host: pass.corp.example
+          paths:
+            - path: /
+              pathType: ImplementationSpecific
+    persistence:
+      symmetric:
+        enabled: true
+        storageClass: "ha-nfs"
+        accessMode: ReadWriteOnce
+        size: 512Mi
+    
+      storage:
+        enabled: true
+        storageClass: "ha-nfs"
+        accessMode: ReadWriteOnce
+        size: 10Gi  

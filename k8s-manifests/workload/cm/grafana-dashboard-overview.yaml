@@ -1,0 +1,1261 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-overview
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  overview.json: |
+    {
+      "uid": "overview",
+      "title": "Обзор",
+      "description": "Домашняя страница: здоровье кластеров, ёмкость и ссылки на детальные дашборды.",
+      "tags": [
+        "platform",
+        "overview",
+        "home"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "editable": true,
+      "graphTooltip": 1,
+      "fiscalYearStartMonth": 0,
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "bolt",
+          "targetBlank": false,
+          "title": "Алерты",
+          "type": "link",
+          "url": "/d/alerts"
+        },
+        {
+          "asDropdown": true,
+          "icon": "dashboard",
+          "keepTime": true,
+          "includeVars": true,
+          "tags": [
+            "platform"
+          ],
+          "targetBlank": false,
+          "title": "Дашборды",
+          "type": "dashboards"
+        }
+      ],
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Источник",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "text": "VictoriaMetrics Prometheus",
+              "value": "VictoriaMetricsProm"
+            },
+            "hide": 0,
+            "skipUrlSync": true
+          },
+          {
+            "name": "cluster",
+            "label": "Кластер",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "query": "label_values(up, cluster)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "",
+          "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "transparent": true,
+          "options": {
+            "mode": "markdown",
+            "content": "**Как читать.** Зелёная плитка с нулём — спокойно. Красное или «лежит» — кликните плитку: откроется детальный дашборд. Справа сверху фильтр **cluster** (по умолчанию оба: workload и root).\n\nСчётчики — сколько проблем *прямо сейчас*. Искорка снизу — как это менялось за выбранный интервал."
+          }
+        },
+        {
+          "id": 2,
+          "type": "row",
+          "title": "Здоровье",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 3
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Алерты",
+          "description": "Сколько warning/error/critical сейчас firing (метрика ALERTS из vmalert). Watchdog не считается.\n\nКлик — история и текущие алерты.",
+          "gridPos": {
+            "h": 5,
+            "w": 3,
+            "x": 0,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"warning|error|critical\",cluster=~\"$cluster\"}) or vector(0)",
+              "legendFormat": "Алерты"
+            }
+          ],
+          "links": [
+            {
+              "title": "История алертов",
+              "url": "/d/alerts?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "История алертов",
+                  "url": "/d/alerts?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ],
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Ноды не Ready",
+          "description": "Сколько нод не в Ready (исключая только что созданные в алертах, здесь — все NotReady).\n\nКлик — обзор нод и Rancher/Cluster.",
+          "gridPos": {
+            "h": 5,
+            "w": 3,
+            "x": 3,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(kube_node_status_condition{cluster=~\"$cluster\",condition=\"Ready\",status=\"true\"} == 0) or vector(0)",
+              "legendFormat": "Ноды не Ready"
+            }
+          ],
+          "links": [
+            {
+              "title": "Ноды",
+              "url": "/d/k8s_views_nodes?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            },
+            {
+              "title": "Rancher / Cluster",
+              "url": "/d/rancher-cluster-1?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            },
+            {
+              "title": "Node Exporter",
+              "url": "/d/rYdddlPWk?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "Ноды",
+                  "url": "/d/k8s_views_nodes?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                },
+                {
+                  "title": "Rancher / Cluster",
+                  "url": "/d/rancher-cluster-1?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                },
+                {
+                  "title": "Node Exporter",
+                  "url": "/d/rYdddlPWk?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ],
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Сайты недоступны",
+          "description": "Внешние HTTP-пробы (blackbox): сколько URL не отдают 200. Это публичные сайты, не поды.\n\nКлик — дашборд Uptime со списком URL и TLS.",
+          "gridPos": {
+            "h": 5,
+            "w": 3,
+            "x": 6,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(probe_success{job=\"uptime-http\",cluster=~\"$cluster\"} == 0) or vector(0)",
+              "legendFormat": "Сайты недоступны"
+            }
+          ],
+          "links": [
+            {
+              "title": "Uptime",
+              "url": "/d/uptime-http?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "Uptime",
+                  "url": "/d/uptime-http?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ],
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Flux не Ready",
+          "description": "GitOps: HelmRelease / Kustomization / GitRepository в False. Долгий False — застрявший деплой.\n\nДетального Flux-дашборда нет — смотрите логи и `flux get all`.",
+          "gridPos": {
+            "h": 5,
+            "w": 3,
+            "x": 9,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(gotk_reconcile_condition{cluster=~\"$cluster\",type=\"Ready\",status=\"False\"} == 1) or vector(0)",
+              "legendFormat": "Flux не Ready"
+            }
+          ],
+          "links": [
+            {
+              "title": "Логи",
+              "url": "/d/k8s-logs?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "Логи",
+                  "url": "/d/k8s-logs?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ],
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "GitLab",
+          "description": "Скрейп gitlab.corp.example (/-/metrics). «лежит» — не снимаем Rails-метрики (инстанс или сеть).\n\nКлик — runners, очередь CI, Sidekiq, Gitaly. Pipelines — пайплайны и jobs.",
+          "gridPos": {
+            "h": 5,
+            "w": 3,
+            "x": 12,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "min(up{job=\"gitlab\",cluster=~\"$cluster\"}) or vector(0)",
+              "legendFormat": "GitLab"
+            }
+          ],
+          "links": [
+            {
+              "title": "GitLab",
+              "url": "/d/gitlab?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            },
+            {
+              "title": "Uptime GitLab",
+              "url": "/d/uptime-http?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            },
+            {
+              "title": "Pipelines",
+              "url": "/d/gitlab-pipelines",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "GitLab",
+                  "url": "/d/gitlab?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                },
+                {
+                  "title": "Uptime GitLab",
+                  "url": "/d/uptime-http",
+                  "targetBlank": false
+                }
+              ],
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "down",
+                      "color": "red"
+                    },
+                    "1": {
+                      "text": "up",
+                      "color": "green"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Redis down",
+          "description": "Сколько инстансов Redis в staging/production не отвечают (redis_up=0). Sentinel/failover смотрите на дашборде.\n\nКлик — Redis.",
+          "gridPos": {
+            "h": 5,
+            "w": 3,
+            "x": 15,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(redis_up{cluster=~\"$cluster\",namespace=~\"redis-staging|redis-production\"} == 0) or vector(0)",
+              "legendFormat": "Redis down"
+            }
+          ],
+          "links": [
+            {
+              "title": "Redis",
+              "url": "/d/redis?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "Redis",
+                  "url": "/d/redis?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ],
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Сертификаты",
+          "description": "Certificate в cert-manager не Ready (ACME/DNS-01 не выпустился). Namespace сертификата — exported_namespace.\n\nКлик — срок жизни и ClusterIssuer.",
+          "gridPos": {
+            "h": 5,
+            "w": 3,
+            "x": 18,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(certmanager_certificate_ready_status{cluster=~\"$cluster\",condition=\"False\"} == 1) or vector(0)",
+              "legendFormat": "Сертификаты"
+            }
+          ],
+          "links": [
+            {
+              "title": "cert-manager",
+              "url": "/d/cert-manager?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "cert-manager",
+                  "url": "/d/cert-manager?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ],
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": 10,
+          "type": "stat",
+          "title": "CrashLoop",
+          "description": "Сколько контейнеров в CrashLoopBackOff прямо сейчас. Обычно OOM, кривой конфиг, падающий вход.\n\nКлик — поды и логи.",
+          "gridPos": {
+            "h": 5,
+            "w": 3,
+            "x": 21,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(kube_pod_container_status_waiting_reason{cluster=~\"$cluster\",reason=\"CrashLoopBackOff\"} == 1) or vector(0)",
+              "legendFormat": "CrashLoop"
+            }
+          ],
+          "links": [
+            {
+              "title": "Поды",
+              "url": "/d/k8s_views_pods?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            },
+            {
+              "title": "Логи",
+              "url": "/d/k8s-logs?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "Поды",
+                  "url": "/d/k8s_views_pods?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                },
+                {
+                  "title": "Логи",
+                  "url": "/d/k8s-logs?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ],
+              "custom": {
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "Что горит",
+          "description": "Текущие firing-алерты (без Watchdog). Клик по строке — история этого алерта. Имя подскажет дашборд: GitLab*, CertManager*, Redis*, ProbeFailed, Flux*, Node*.",
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 9
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "instant": true,
+              "expr": "ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"warning|error|critical\",cluster=~\"$cluster\"}"
+            }
+          ],
+          "links": [
+            {
+              "title": "История алертов",
+              "url": "/d/alerts?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            },
+            "sortBy": [
+              {
+                "displayName": "severity",
+                "desc": true
+              }
+            ]
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true,
+                "align": "left"
+              },
+              "links": [
+                {
+                  "title": "История алерта",
+                  "url": "/d/alerts?${cluster:queryparam}&${__url_time_range}&var-alertname=${__data.fields.алерт:percentencode}",
+                  "targetBlank": false
+                }
+              ]
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "severity"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "warning": {
+                            "color": "orange",
+                            "text": "warning"
+                          },
+                          "error": {
+                            "color": "red",
+                            "text": "error"
+                          },
+                          "critical": {
+                            "color": "red",
+                            "text": "critical"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "alertname"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 280
+                  }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "Value": true,
+                  "alertstate": true,
+                  "prometheus": true,
+                  "container": true,
+                  "endpoint": true,
+                  "instance": true,
+                  "job": true,
+                  "pod": true,
+                  "service": true,
+                  "grafana_folder": true,
+                  "alertgroup": true,
+                  "victoriametrics_app": true,
+                  "scrape_job": true
+                },
+                "renameByName": {
+                  "alertname": "алерт",
+                  "severity": "severity",
+                  "cluster": "кластер",
+                  "namespace": "namespace",
+                  "node": "нода"
+                },
+                "indexByName": {
+                  "severity": 0,
+                  "алерт": 1,
+                  "кластер": 2,
+                  "namespace": 3,
+                  "нода": 4
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "row",
+          "title": "Ёмкость",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 18
+          }
+        },
+        {
+          "id": 13,
+          "type": "gauge",
+          "title": "CPU",
+          "description": "Средняя занятость CPU по всем нодам выбранных кластеров (1 − idle). Оранжевый с ~70%, красный с ~85%.\n\nКлик — compute resources и вид по нодам.",
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 19
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "1 - avg(rate(node_cpu_seconds_total{cluster=~\"$cluster\",mode=\"idle\"}[$__rate_interval]))",
+              "legendFormat": "CPU"
+            }
+          ],
+          "links": [
+            {
+              "title": "Ресурсы кластера",
+              "url": "/d/efa86fd1d0c121a26444b636a3f509a8?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            },
+            {
+              "title": "Ноды",
+              "url": "/d/k8s_views_nodes?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true,
+            "minVizHeight": 80,
+            "minVizWidth": 80
+          },
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 1,
+              "unit": "percentunit",
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.7
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.85
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "Ресурсы кластера",
+                  "url": "/d/efa86fd1d0c121a26444b636a3f509a8?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                },
+                {
+                  "title": "Ноды",
+                  "url": "/d/k8s_views_nodes?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": 14,
+          "type": "gauge",
+          "title": "Память",
+          "description": "Доля занятой RAM: 1 − MemAvailable/MemTotal по всем нодам. Это не working set подов, а взгляд со стороны ОС.\n\nКлик — ресурсы кластера.",
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 19
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "1 - (sum(node_memory_MemAvailable_bytes{cluster=~\"$cluster\"}) / sum(node_memory_MemTotal_bytes{cluster=~\"$cluster\"}))",
+              "legendFormat": "Память"
+            }
+          ],
+          "links": [
+            {
+              "title": "Ресурсы кластера",
+              "url": "/d/efa86fd1d0c121a26444b636a3f509a8?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            },
+            {
+              "title": "Rancher / Cluster",
+              "url": "/d/rancher-cluster-1?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true,
+            "minVizHeight": 80,
+            "minVizWidth": 80
+          },
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 1,
+              "unit": "percentunit",
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.7
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.85
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "Ресурсы кластера",
+                  "url": "/d/efa86fd1d0c121a26444b636a3f509a8?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                },
+                {
+                  "title": "Rancher / Cluster",
+                  "url": "/d/rancher-cluster-1?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": 15,
+          "type": "gauge",
+          "title": "Диск (худший)",
+          "description": "Самый заполненный диск среди нод (без tmpfs/overlay). Одна маленькая ФС может красить плитку — тогда смотрите Node Exporter Full.\n\nКлик — ноды и полный node-exporter.",
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 19
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max((node_filesystem_size_bytes{cluster=~\"$cluster\",fstype!~\"tmpfs|overlay|squashfs\"} - node_filesystem_avail_bytes{cluster=~\"$cluster\",fstype!~\"tmpfs|overlay|squashfs\"}) / node_filesystem_size_bytes{cluster=~\"$cluster\",fstype!~\"tmpfs|overlay|squashfs\"})",
+              "legendFormat": "Диск (худший)"
+            }
+          ],
+          "links": [
+            {
+              "title": "Node Exporter / Nodes",
+              "url": "/d/7d57716318ee0dddbac5a7f451fb7753?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            },
+            {
+              "title": "Node Exporter Full",
+              "url": "/d/rYdddlPWk?${cluster:queryparam}&${__url_time_range}",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true,
+            "minVizHeight": 80,
+            "minVizWidth": 80
+          },
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 1,
+              "unit": "percentunit",
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.7
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.85
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "Node Exporter / Nodes",
+                  "url": "/d/7d57716318ee0dddbac5a7f451fb7753?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                },
+                {
+                  "title": "Node Exporter Full",
+                  "url": "/d/rYdddlPWk?${cluster:queryparam}&${__url_time_range}",
+                  "targetBlank": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": 16,
+          "type": "row",
+          "title": "Куда смотреть",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 26
+          }
+        },
+        {
+          "id": 17,
+          "type": "text",
+          "title": "",
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 27
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "#### Кластер\n- [Ноды, обзор](/d/k8s_views_nodes?${cluster:queryparam})\n- [Ресурсы кластера (CPU/RAM)](/d/efa86fd1d0c121a26444b636a3f509a8?${cluster:queryparam})\n- [Cluster Autoscaler](/d/cluster-autoscaler?${cluster:queryparam}) — пулы, clone, scale-up/down\n- [Rancher / Cluster](/d/rancher-cluster-1?${cluster:queryparam})\n- [Нода целиком (node-exporter)](/d/rYdddlPWk?${cluster:queryparam})\n- [Поды](/d/k8s_views_pods?${cluster:queryparam})\n- [Namespaces](/d/k8s_views_ns?${cluster:queryparam})"
+          }
+        },
+        {
+          "id": 18,
+          "type": "text",
+          "title": "",
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 27
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "#### Приложения\n- [GitLab](/d/gitlab?${cluster:queryparam}) — runners, CI, Sidekiq\n- [GitLab pipelines](/d/gitlab-pipelines) — пайплайны и jobs\n- [cert-manager](/d/cert-manager?${cluster:queryparam}) — сертификаты и ACME\n- [Redis](/d/redis?${cluster:queryparam}) — staging / production\n- [Sentry](/d/sentry)\n- [VPA](/d/vpa-recommendations?${cluster:queryparam}) — requests vs usage"
+          }
+        },
+        {
+          "id": 19,
+          "type": "text",
+          "title": "",
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 27
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "#### Сеть\n- [Technitium DNS](/d/technitium-dns) — dns-1/2, SOA, QPS\n- [Ingress NGINX](/d/nginx) — запросы и латентность\n- [Cilium](/d/vtuWtdumz) — CNI, drops\n- [Hubble](/d/5HftnJAWz) — L7 / DNS\n- [Сеть кластера](/d/ff635a025bcfea7bc3dd4f508990a3e9)"
+          }
+        },
+        {
+          "id": 20,
+          "type": "text",
+          "title": "",
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 27
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "#### Наблюдаемость\n- [Uptime](/d/uptime-http?${cluster:queryparam}) — внешние HTTP-пробы\n- [Angie](/d/angie) — оба балансера, vhost и upstream\n- [Domains](/d/domains) — оплата регистрации доменов\n- [Логи](/d/k8s-logs?${cluster:queryparam})\n- [Алерты](/d/alerts?${cluster:queryparam}) — история и текущие\n- [Глобальный вид k8s](/d/k8s_views_global?${cluster:queryparam})"
+          }
+        }
+      ]
+    }

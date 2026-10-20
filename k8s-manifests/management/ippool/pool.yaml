@@ -1,0 +1,25 @@
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: ip-pool
+  namespace: kube-system
+spec:
+  blocks:
+    - start: "10.16.0.181"
+      stop: "10.16.0.199"
+---
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: l2-policy
+  namespace: kube-system
+spec:
+  serviceSelector:
+    matchLabels:
+      io.cilium/lb-managed: "true"
+  nodeSelector:
+    matchLabels: {}
+  interfaces:
+    - "^eth[0-9]+"
+    - "^ens[0-9]+"
+  loadBalancerIPs: true

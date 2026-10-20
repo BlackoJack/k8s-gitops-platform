@@ -1,0 +1,52 @@
+# Не больше двух review-окружений.
+# Лейбл corp.example/review=true ставит werf (WERF_ADD_LABEL) на ресурсы релиза, не на namespace.
+# Слот — namespace, где уже есть Deployment app-backend с этим лейблом.
+# Новый объект с лейблом в третьем namespace не создаётся. В уже занятом — проходит.
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/kyverno.io/clusterpolicy_v1.json
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: limit-review-namespaces
+  annotations:
+    policies.kyverno.io/title: Limit Review Namespaces
+    policies.kyverno.io/category: Capacity
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Namespace
+spec:
+  background: false
+  rules:
+    - name: max-two-review-resources
+      match:
+        any:
+          - resources:
+              kinds:
+                - "*"
+              selector:
+                matchLabels:
+                  corp.example/review: "true"
+      context:
+        - name: reviewcount
+          apiCall:
+            urlPath: /apis/apps/v1/deployments
+            jmesPath: "items[?metadata.labels.\"corp.example/review\"=='true' && metadata.name=='app-backend'].metadata.namespace | length(@)"
+        - name: already
+          apiCall:
+            urlPath: /apis/apps/v1/deployments
+            jmesPath: "items[?metadata.labels.\"corp.example/review\"=='true' && metadata.name=='app-backend'].metadata.namespace | contains(@, '{{ request.namespace }}')"
+      preconditions:
+        all:
+          - key: "{{ request.operation || 'BACKGROUND' }}"
+            operator: Equals
+            value: CREATE
+      validate:
+        failureAction: Enforce
+        message: "Already {{ reviewcount }} review namespaces (corp.example/review=true). The limit is 2."
+        deny:
+          conditions:
+            all:
+              - key: "{{ reviewcount }}"
+                operator: GreaterThanOrEquals
+                value: 2
+              - key: "{{ already }}"
+                operator: Equals
+                value: false

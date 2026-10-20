@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/kyverno.io/policyexception_v2.json
+# Redis data pods already have probes. Exporter sidecar and Sentinel have no
+# probe fields in redis-replication 0.17.1 / operator CR.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: redis-app-probes
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: require-probes
+      ruleNames:
+        - validate-probes
+  match:
+    any:
+      - resources:
+          kinds:
+            - StatefulSet
+          namespaces:
+            - redis-production
+            - redis-staging
+          names:
+            - redis-app
+            - redis-app-s

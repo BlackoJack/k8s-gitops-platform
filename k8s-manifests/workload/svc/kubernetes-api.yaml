@@ -1,0 +1,27 @@
+# External kube-apiserver VIP. L2 from control-plane (l2-policy-apiserver),
+# not from ingress — API must survive without the ingress pool.
+# Backends are hostNetwork kube-apiserver pods (node IP:6443).
+# Do not set io.cilium/lb-managed: that label is the ingress L2 policy.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-api
+  namespace: kube-system
+  labels:
+    corp.example/apiserver-vip: "true"
+    external-dns.corp.example/enabled: "true"
+  annotations:
+    lbipam.cilium.io/ips: "10.16.0.205"
+    external-dns.alpha.kubernetes.io/hostname: k8s.msk.corp.example
+spec:
+  type: LoadBalancer
+  allocateLoadBalancerNodePorts: false
+  externalTrafficPolicy: Local
+  ports:
+    - name: https
+      port: 6443
+      targetPort: 6443
+      protocol: TCP
+  selector:
+    component: kube-apiserver
+    tier: control-plane

@@ -1,0 +1,1551 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-k8s-logs
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Logs
+data:
+  k8s-logs.json: |
+    {
+      "uid": "k8s-logs",
+      "title": "Логи",
+      "description": "Логи кластера из VictoriaLogs и потребление CPU, памяти, сети, диска и рестарты из VictoriaMetrics по тем же фильтрам.",
+      "tags": [
+        "platform",
+        "logs",
+        "kubernetes",
+        "victorialogs"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "10s",
+      "editable": true,
+      "graphTooltip": 1,
+      "fiscalYearStartMonth": 0,
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "bolt",
+          "includeVars": false,
+          "keepTime": true,
+          "targetBlank": false,
+          "title": "Алерты",
+          "type": "link",
+          "url": "/d/alerts"
+        },
+        {
+          "asDropdown": true,
+          "icon": "dashboard",
+          "keepTime": true,
+          "includeVars": false,
+          "tags": [
+            "platform"
+          ],
+          "targetBlank": false,
+          "title": "Дашборды",
+          "type": "dashboards"
+        },
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "includeVars": false,
+          "keepTime": true,
+          "targetBlank": true,
+          "title": "VictoriaLogs UI",
+          "tooltip": "Live tail и фасеты полей",
+          "type": "link",
+          "url": "https://logs.msk.corp.example/select/vmui/"
+        }
+      ],
+      "time": {
+        "from": "now-15m",
+        "to": "now"
+      },
+      "timepicker": {
+        "refresh_intervals": [
+          "5s",
+          "10s",
+          "30s",
+          "1m",
+          "5m"
+        ]
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "cluster",
+            "label": "кластер",
+            "type": "query",
+            "datasource": {
+              "type": "victoriametrics-logs-datasource",
+              "uid": "VictoriaLogs"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*",
+            "current": {
+              "text": "All",
+              "value": "$__all",
+              "selected": true
+            },
+            "query": {
+              "refId": "VictoriaLogsVariableQueryEditor-VariableQuery",
+              "type": "fieldValue",
+              "field": "cluster",
+              "query": "*",
+              "limit": 50
+            },
+            "definition": "cluster"
+          },
+          {
+            "name": "namespace",
+            "label": "namespace",
+            "type": "query",
+            "datasource": {
+              "type": "victoriametrics-logs-datasource",
+              "uid": "VictoriaLogs"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*",
+            "current": {
+              "text": "All",
+              "value": "$__all",
+              "selected": true
+            },
+            "query": {
+              "refId": "VictoriaLogsVariableQueryEditor-VariableQuery",
+              "type": "fieldValue",
+              "field": "kubernetes.pod_namespace",
+              "query": "cluster:$cluster",
+              "limit": 500
+            },
+            "definition": "kubernetes.pod_namespace"
+          },
+          {
+            "name": "pod",
+            "label": "pod",
+            "type": "query",
+            "datasource": {
+              "type": "victoriametrics-logs-datasource",
+              "uid": "VictoriaLogs"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*",
+            "current": {
+              "text": "All",
+              "value": "$__all",
+              "selected": true
+            },
+            "query": {
+              "refId": "VictoriaLogsVariableQueryEditor-VariableQuery",
+              "type": "fieldValue",
+              "field": "kubernetes.pod_name",
+              "query": "cluster:$cluster kubernetes.pod_namespace:$namespace",
+              "limit": 1000
+            },
+            "definition": "kubernetes.pod_name"
+          },
+          {
+            "name": "container",
+            "label": "container",
+            "type": "query",
+            "datasource": {
+              "type": "victoriametrics-logs-datasource",
+              "uid": "VictoriaLogs"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*",
+            "current": {
+              "text": "All",
+              "value": "$__all",
+              "selected": true
+            },
+            "query": {
+              "refId": "VictoriaLogsVariableQueryEditor-VariableQuery",
+              "type": "fieldValue",
+              "field": "kubernetes.container_name",
+              "query": "cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod",
+              "limit": 200
+            },
+            "definition": "kubernetes.container_name"
+          },
+          {
+            "name": "groupby",
+            "label": "группировка",
+            "type": "custom",
+            "query": "namespace : kubernetes.pod_namespace, pod : kubernetes.pod_name, container : kubernetes.container_name, cluster : cluster, node : kubernetes.pod_node_name, level : level",
+            "includeAll": false,
+            "multi": false,
+            "current": {
+              "text": "namespace",
+              "value": "kubernetes.pod_namespace",
+              "selected": true
+            },
+            "options": [
+              {
+                "text": "namespace",
+                "value": "kubernetes.pod_namespace",
+                "selected": true
+              },
+              {
+                "text": "pod",
+                "value": "kubernetes.pod_name",
+                "selected": false
+              },
+              {
+                "text": "container",
+                "value": "kubernetes.container_name",
+                "selected": false
+              },
+              {
+                "text": "cluster",
+                "value": "cluster",
+                "selected": false
+              },
+              {
+                "text": "node",
+                "value": "kubernetes.pod_node_name",
+                "selected": false
+              },
+              {
+                "text": "level",
+                "value": "level",
+                "selected": false
+              }
+            ],
+            "description": "Режет графики, top и саму ленту: по одному панели на значение. Список панелей — фильтр «группы в ленте»."
+          },
+          {
+            "name": "group",
+            "label": "группы в ленте",
+            "type": "query",
+            "datasource": {
+              "type": "victoriametrics-logs-datasource",
+              "uid": "VictoriaLogs"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*",
+            "current": {
+              "text": "All",
+              "value": "$__all",
+              "selected": true
+            },
+            "query": {
+              "refId": "VictoriaLogsVariableQueryEditor-VariableQuery",
+              "type": "fieldValue",
+              "field": "$groupby",
+              "query": "$focus cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search",
+              "limit": 8
+            },
+            "definition": "$groupby",
+            "description": "Отдельная лента на каждое выбранное значение. All — до 8 значений (алфавит, не top). Для pod сначала сузьте namespace."
+          },
+          {
+            "name": "focus",
+            "label": "фокус",
+            "type": "custom",
+            "query": "все : *, только ошибки : error",
+            "includeAll": false,
+            "multi": false,
+            "current": {
+              "text": "все",
+              "value": "*",
+              "selected": true
+            },
+            "options": [
+              {
+                "text": "все",
+                "value": "*",
+                "selected": true
+              },
+              {
+                "text": "только ошибки",
+                "value": "error",
+                "selected": false
+              }
+            ],
+            "description": "«только ошибки» оставляет строки со словом error. Уже сужает и графики, и ленту."
+          },
+          {
+            "name": "maxlines",
+            "label": "строк в ленте",
+            "type": "custom",
+            "query": "500,1000,2000,5000",
+            "includeAll": false,
+            "multi": false,
+            "current": {
+              "text": "500",
+              "value": "500",
+              "selected": true
+            },
+            "options": [
+              {
+                "text": "500",
+                "value": "500",
+                "selected": true
+              },
+              {
+                "text": "1000",
+                "value": "1000",
+                "selected": false
+              },
+              {
+                "text": "2000",
+                "value": "2000",
+                "selected": false
+              },
+              {
+                "text": "5000",
+                "value": "5000",
+                "selected": false
+              }
+            ]
+          },
+          {
+            "name": "search",
+            "label": "поиск",
+            "type": "textbox",
+            "hide": 0,
+            "current": {
+              "text": "*",
+              "value": "*"
+            },
+            "query": "*",
+            "description": "* — всё. Слово в сообщении или фрагмент LogsQL, например status:>=500."
+          },
+          {
+            "name": "Filters",
+            "label": "ещё фильтры",
+            "type": "adhoc",
+            "datasource": {
+              "type": "victoriametrics-logs-datasource",
+              "uid": "VictoriaLogs"
+            }
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "",
+          "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "transparent": true,
+          "options": {
+            "mode": "markdown",
+            "content": "**Группировка** режет графики и ленту: ниже будет отдельная панель на каждое значение (фильтр «группы в ленте», максимум 8). **Фокус** и namespace/pod режут всю выборку.\n\n**Ресурсы** — те же cluster, namespace, pod и container, но из VictoriaMetrics. Сеть считается на под: фильтр container на неё не действует. На графиках топ серий, чтобы «All» не раздувал легенду.\n\nВ каждой ленте справа — поля, табличный вид и **скачивание txt / json / csv**."
+          }
+        },
+        {
+          "id": 20,
+          "type": "row",
+          "title": "Сводка",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 3
+          },
+          "panels": []
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Строк",
+          "description": "Сколько лог-строк попало в фильтры за интервал.",
+          "gridPos": {
+            "h": 4,
+            "w": 5,
+            "x": 0,
+            "y": 4
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "$focus cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | stats count() logs",
+              "queryType": "stats",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Ошибки",
+          "description": "error/fatal/critical в тексте или level, либо HTTP status ≥ 400 — независимо от фокуса.",
+          "gridPos": {
+            "h": 4,
+            "w": 5,
+            "x": 5,
+            "y": 4
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "(error OR level:in(\"error\",\"err\",\"fatal\",\"critical\",\"Error\") OR status:>=400) cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | stats count() logs",
+              "queryType": "stats",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 10
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Namespaces",
+          "description": "Сколько разных namespace в текущей выборке.",
+          "gridPos": {
+            "h": 4,
+            "w": 5,
+            "x": 10,
+            "y": 4
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "$focus cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | stats count_uniq(kubernetes.pod_namespace) namespaces",
+              "queryType": "stats",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "purple",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Pods",
+          "description": "Сколько разных подов в текущей выборке.",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 15,
+            "y": 4
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "$focus cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | stats count_uniq(kubernetes.pod_name) pods",
+              "queryType": "stats",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "orange",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Групп",
+          "description": "Уникальных значений у поля группировки. Для pod лучше сначала сузить namespace.",
+          "gridPos": {
+            "h": 4,
+            "w": 5,
+            "x": 19,
+            "y": 4
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "$focus cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | stats count_uniq($groupby) groups",
+              "queryType": "stats",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Поток · ${groupby:text}",
+          "description": "Слои — выбранная группировка. Для pod/container сначала сузьте namespace, иначе серий будет слишком много.",
+          "gridPos": {
+            "h": 10,
+            "w": 16,
+            "x": 0,
+            "y": 8
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "$focus cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | stats by ($groupby) count() logs",
+              "queryType": "statsRange",
+              "refId": "A",
+              "legendFormat": "{{$groupby}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "calcs": [
+                "sum"
+              ],
+              "sortBy": "Sum",
+              "sortDesc": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 85,
+                "lineWidth": 0,
+                "showPoints": "never",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "barAlignment": 0,
+                "gradientMode": "hue",
+                "axisBorderShow": false,
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "unit": "short"
+            }
+          }
+        },
+        {
+          "id": 8,
+          "type": "piechart",
+          "title": "Доля · ${groupby:text}",
+          "description": "Топ-12 значений группировки за весь интервал.",
+          "gridPos": {
+            "h": 10,
+            "w": 8,
+            "x": 16,
+            "y": 8
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "$focus cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | stats by ($groupby) count() logs | sort by (logs desc) | limit 12",
+              "queryType": "stats",
+              "refId": "A",
+              "legendFormat": "{{$groupby}}"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "pieType": "donut",
+            "displayLabels": [
+              "percent"
+            ],
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "values": [
+                "value",
+                "percent"
+              ],
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "short"
+            }
+          }
+        },
+        {
+          "id": 9,
+          "type": "table",
+          "title": "Top · ${groupby:text}",
+          "description": "Самые болтливые значения. Меню панели (⋯) → Inspect → Data → Download CSV.",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 18
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "$focus cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | stats by ($groupby) count() logs | sort by (logs desc) | limit 20",
+              "queryType": "stats",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "countRows": false,
+              "reducer": [
+                "sum"
+              ],
+              "fields": ""
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true,
+                "align": "auto",
+                "inspect": true
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/^(logs|строк|Value)$/"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient",
+                      "valueDisplayMode": "color"
+                    }
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "continuous-BlPu"
+                    }
+                  },
+                  {
+                    "id": "displayName",
+                    "value": "строк"
+                  }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "time": true
+                },
+                "renameByName": {
+                  "logs": "строк",
+                  "Value": "строк"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "type": "table",
+          "title": "Ошибки · ${groupby:text}",
+          "description": "error/fatal/HTTP≥400 по группировке, независимо от фокуса. CSV — через ⋯ → Inspect → Data.",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 18
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "(error OR level:in(\"error\",\"err\",\"fatal\",\"critical\",\"Error\") OR status:>=400) cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | stats by ($groupby) count() errors | sort by (errors desc) | limit 20",
+              "queryType": "stats",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "countRows": false,
+              "reducer": [
+                "sum"
+              ],
+              "fields": ""
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true,
+                "align": "auto",
+                "inspect": true
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/^(errors|ошибок|Value)$/"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient",
+                      "valueDisplayMode": "color"
+                    }
+                  },
+                  {
+                    "id": "min",
+                    "value": 0
+                  },
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "continuous-YlRd"
+                    }
+                  },
+                  {
+                    "id": "displayName",
+                    "value": "ошибок"
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "orange",
+                          "value": 1
+                        },
+                        {
+                          "color": "red",
+                          "value": 20
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "time": true
+                },
+                "renameByName": {
+                  "errors": "ошибок",
+                  "Value": "ошибок"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 30,
+          "type": "row",
+          "title": "Ресурсы",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 27
+          },
+          "panels": []
+        },
+        {
+          "id": 31,
+          "type": "timeseries",
+          "title": "CPU",
+          "description": "Ядра по контейнерам (cAdvisor), без pause. Топ-20 серий в выбранных фильтрах.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 28
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetricsProm"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetricsProm"
+              },
+              "editorMode": "code",
+              "expr": "topk(20, sum by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{cluster=~\"$cluster\", namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\", container!=\"\", container!=\"POD\", image!=\"\"}[$__rate_interval])))",
+              "legendFormat": "{{namespace}}/{{pod}}/{{container}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": ["mean", "max"],
+              "sortBy": "Max",
+              "sortDesc": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "unit": "short",
+              "decimals": 3,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "stacking": { "mode": "none" },
+                "spanNulls": false
+              }
+            }
+          }
+        },
+        {
+          "id": 32,
+          "type": "timeseries",
+          "title": "Память",
+          "description": "Working set — то, что kubelet сравнивает с memory limit. Топ-20 контейнеров.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 28
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetricsProm"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetricsProm"
+              },
+              "editorMode": "code",
+              "expr": "topk(20, sum by (namespace, pod, container) (container_memory_working_set_bytes{cluster=~\"$cluster\", namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\", container!=\"\", container!=\"POD\", image!=\"\"}))",
+              "legendFormat": "{{namespace}}/{{pod}}/{{container}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": ["mean", "max"],
+              "sortBy": "Max",
+              "sortDesc": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "unit": "bytes",
+              "decimals": 1,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "stacking": { "mode": "none" },
+                "spanNulls": false
+              }
+            }
+          }
+        },
+        {
+          "id": 33,
+          "type": "timeseries",
+          "title": "Сеть",
+          "description": "Приём и передача по eth0 пода. cAdvisor не делит сеть по контейнерам, фильтр container здесь не применяется. hostNetwork (нода, cilium, node-exporter) в этот график не входит: у них интерфейс не eth0.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 36
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetricsProm"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetricsProm"
+              },
+              "editorMode": "code",
+              "expr": "topk(12, sum by (namespace, pod) (rate(container_network_receive_bytes_total{cluster=~\"$cluster\", namespace=~\"$namespace\", pod=~\"$pod\", interface=\"eth0\"}[$__rate_interval])))",
+              "legendFormat": "↓ {{namespace}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetricsProm"
+              },
+              "editorMode": "code",
+              "expr": "topk(12, sum by (namespace, pod) (rate(container_network_transmit_bytes_total{cluster=~\"$cluster\", namespace=~\"$namespace\", pod=~\"$pod\", interface=\"eth0\"}[$__rate_interval])))",
+              "legendFormat": "↑ {{namespace}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": ["mean", "max"],
+              "sortBy": "Max",
+              "sortDesc": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "unit": "Bps",
+              "decimals": 1,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "stacking": { "mode": "none" },
+                "spanNulls": false
+              }
+            }
+          }
+        },
+        {
+          "id": 34,
+          "type": "timeseries",
+          "title": "CPU throttle",
+          "description": "Доля времени, когда контейнер стоял в CFS throttle из-за CPU limit. 100% — троттлинг всю секунду.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 36
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetricsProm"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetricsProm"
+              },
+              "editorMode": "code",
+              "expr": "topk(20, sum by (namespace, pod, container) (rate(container_cpu_cfs_throttled_seconds_total{cluster=~\"$cluster\", namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\", container!=\"\", container!=\"POD\"}[$__rate_interval])))",
+              "legendFormat": "{{namespace}}/{{pod}}/{{container}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": ["mean", "max"],
+              "sortBy": "Max",
+              "sortDesc": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "unit": "percentunit",
+              "min": 0,
+              "decimals": 1,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "stacking": { "mode": "none" },
+                "spanNulls": false
+              }
+            }
+          }
+        },
+        {
+          "id": 35,
+          "type": "timeseries",
+          "title": "Диск",
+          "description": "Чтение и запись файловой системы контейнера. Топ-12 в каждом направлении.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 44
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetricsProm"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetricsProm"
+              },
+              "editorMode": "code",
+              "expr": "topk(12, sum by (namespace, pod, container) (rate(container_fs_reads_bytes_total{cluster=~\"$cluster\", namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\", container!=\"\", container!=\"POD\", image!=\"\"}[$__rate_interval])))",
+              "legendFormat": "чтение {{namespace}}/{{pod}}/{{container}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetricsProm"
+              },
+              "editorMode": "code",
+              "expr": "topk(12, sum by (namespace, pod, container) (rate(container_fs_writes_bytes_total{cluster=~\"$cluster\", namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\", container!=\"\", container!=\"POD\", image!=\"\"}[$__rate_interval])))",
+              "legendFormat": "запись {{namespace}}/{{pod}}/{{container}}",
+              "refId": "B"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": ["mean", "max"],
+              "sortBy": "Max",
+              "sortDesc": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "unit": "Bps",
+              "decimals": 1,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "stacking": { "mode": "none" },
+                "spanNulls": false
+              }
+            }
+          }
+        },
+        {
+          "id": 36,
+          "type": "timeseries",
+          "title": "Рестарты",
+          "description": "Сколько раз контейнер перезапускался на каждом шаге графика (kube-state-metrics).",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 44
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetricsProm"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "VictoriaMetricsProm"
+              },
+              "editorMode": "code",
+              "expr": "topk(20, sum by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total{cluster=~\"$cluster\", namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"}[$__rate_interval])))",
+              "legendFormat": "{{namespace}}/{{pod}}/{{container}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": ["sum"],
+              "sortBy": "Sum",
+              "sortDesc": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "unit": "short",
+              "decimals": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 80,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "stacking": { "mode": "normal", "group": "A" },
+                "barAlignment": 0
+              }
+            }
+          }
+        },
+        {
+          "id": 21,
+          "type": "row",
+          "title": "Ленты по ${groupby:text}",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 52
+          },
+          "panels": []
+        },
+        {
+          "id": 11,
+          "type": "logs",
+          "title": "${groupby:text}: ${group}",
+          "description": "Только эта группа. Справа — поля, табличный вид и скачивание txt/json/csv. Список групп — фильтр сверху «группы в ленте».",
+          "repeat": "group",
+          "repeatDirection": "v",
+          "maxPerRow": 1,
+          "gridPos": {
+            "h": 16,
+            "w": 24,
+            "x": 0,
+            "y": 53
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "VictoriaLogs"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "editorMode": "code",
+              "expr": "$focus $groupby:$group cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | limit $maxlines",
+              "queryType": "instant",
+              "refId": "A",
+              "maxLines": 5000
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": false,
+            "showCommonLabels": false,
+            "showLevel": true,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": true,
+            "enableLogDetails": true,
+            "enableInfiniteScrolling": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none",
+            "syntaxHighlighting": true,
+            "detailsMode": "sidebar",
+            "showControls": true,
+            "showFieldSelector": true,
+            "allowDownload": true,
+            "showLogContextToggle": false,
+            "fontSize": "small",
+            "unwrappedColumns": false,
+            "timestampResolution": "ms",
+            "controlsStorageKey": "k8s-logs-feed-group",
+            "displayedFields": [
+              "___LOG_LINE_BODY___",
+              "kubernetes.pod_namespace",
+              "kubernetes.pod_name",
+              "kubernetes.container_name"
+            ]
+          }
+        },
+        {
+          "id": 22,
+          "type": "row",
+          "title": "Все группы в одной ленте",
+          "collapsed": true,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 69
+          },
+          "panels": [
+            {
+              "id": 12,
+              "type": "logs",
+              "title": "Общая лента",
+              "description": "Без нарезки по группировке — все выбранные фильтры в одном потоке.",
+              "gridPos": {
+                "h": 20,
+                "w": 24,
+                "x": 0,
+                "y": 70
+              },
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "VictoriaLogs"
+              },
+              "targets": [
+                {
+                  "datasource": {
+                    "type": "victoriametrics-logs-datasource",
+                    "uid": "VictoriaLogs"
+                  },
+                  "editorMode": "code",
+                  "expr": "$focus cluster:$cluster kubernetes.pod_namespace:$namespace kubernetes.pod_name:$pod kubernetes.container_name:$container $search | limit $maxlines",
+                  "queryType": "instant",
+                  "refId": "A",
+                  "maxLines": 5000
+                }
+              ],
+              "options": {
+                "showTime": true,
+                "showLabels": false,
+                "showCommonLabels": false,
+                "showLevel": true,
+                "wrapLogMessage": true,
+                "prettifyLogMessage": true,
+                "enableLogDetails": true,
+                "enableInfiniteScrolling": true,
+                "sortOrder": "Descending",
+                "dedupStrategy": "none",
+                "syntaxHighlighting": true,
+                "detailsMode": "sidebar",
+                "showControls": true,
+                "showFieldSelector": true,
+                "allowDownload": true,
+                "showLogContextToggle": false,
+                "fontSize": "small",
+                "unwrappedColumns": false,
+                "timestampResolution": "ms",
+                "controlsStorageKey": "k8s-logs-feed-all",
+                "displayedFields": [
+                  "___LOG_LINE_BODY___",
+                  "kubernetes.pod_namespace",
+                  "kubernetes.pod_name",
+                  "kubernetes.container_name"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }

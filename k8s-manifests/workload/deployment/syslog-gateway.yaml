@@ -1,0 +1,101 @@
+# Syslog listener for network devices. High port because the container is
+# non-root; svc/syslog-gateway.yaml publishes UDP/TCP 514.
+# Writes straight to in-cluster vlinsert, not through the public vmauth.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syslog-gateway
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: syslog-gateway
+    app.kubernetes.io/component: logging
+spec:
+  replicas: 1
+  # One disk buffer on a shared volume. The previous RollingUpdate default
+  # leaves spec.strategy.rollingUpdate set; it must be cleared or the API
+  # rejects type Recreate and the new pod never replaces the old one.
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: syslog-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: syslog-gateway
+        app.kubernetes.io/component: logging
+      annotations:
+        corp.example/syslog-config: vendor-host
+    spec:
+      nodeSelector:
+        environment: infra
+      tolerations:
+        - key: environment
+          operator: Equal
+          value: infra
+          effect: PreferNoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vector
+          image: docker.io/timberio/vector:0.58.0-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config
+            - /etc/vector/vector.yaml
+          ports:
+            - name: syslog-tcp
+              containerPort: 5514
+              protocol: TCP
+            - name: syslog-udp
+              containerPort: 5514
+              protocol: UDP
+            - name: api
+              containerPort: 8686
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 384Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+            - name: buffer
+              mountPath: /var/lib/vector
+      volumes:
+        - name: config
+          configMap:
+            name: syslog-gateway
+        # ha-nfs does not release flock after the writer pod is gone, so
+        # Vector cannot open buffer.lock on that volume.
+        - name: buffer
+          emptyDir:
+            sizeLimit: 2Gi

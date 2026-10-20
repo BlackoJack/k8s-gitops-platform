@@ -1,0 +1,60 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+spec:
+  chart:
+    spec:
+      chart: cluster-autoscaler
+      reconcileStrategy: ChartVersion
+      sourceRef:
+        kind: HelmRepository
+        name: autoscaler
+        namespace: flux-system
+  interval: 1m0s
+  values:
+    autoDiscovery:
+      namespace: fleet-default
+    cloudProvider: rancher
+    cloudConfigPath: /config/config.yaml
+    rbac:
+      create: true
+      serviceAccount:
+        create: true
+        name: cluster-autoscaler
+    extraVolumes:
+      - name: config-volume
+        secret:
+          secretName: rancher-cloud-config
+    extraVolumeMounts:
+      - name: config-volume
+        mountPath: /config
+        readOnly: true
+    extraArgs:
+      v: 2
+      scan-interval: 10s
+      expander: random
+      enable-proactive-scaleup: true
+      enforce-node-group-min-size: true
+      emit-per-nodegroup-metrics: true
+      scale-down-non-empty-candidates-count: 1
+      skip-nodes-with-local-storage: false
+      skip-nodes-with-system-pods: false
+      scale-down-enabled: true
+      scale-down-unneeded-time: 10m
+      scale-down-unready-time: 30m
+      scale-down-delay-after-add: 20m
+      max-node-provision-time: 30m
+      max-node-startup-time: 30m
+      ok-total-unready-count: 8
+      ignore-daemonsets-utilization: true
+      new-pod-scale-up-delay: 15s
+      max-nodes-total: 50
+    service:
+      labels:
+        monitoring.corp.example/scrape: "true"
+    image:
+      tag: "v1.36.1" 
+    

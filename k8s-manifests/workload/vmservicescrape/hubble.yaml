@@ -1,0 +1,25 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: hubble
+  namespace: monitoring
+spec:
+  jobLabel: k8s-app
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  selector:
+    matchLabels:
+      k8s-app: hubble
+  targetLabels:
+    - k8s-app
+  endpoints:
+    - port: hubble-metrics
+      path: /metrics
+      interval: 30s
+      honorLabels: true
+      relabelConfigs:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

@@ -1,0 +1,40 @@
+# rancher-monitoring-dashboards nginx resolves
+# <upstreamService>.cattle-monitoring-system.svc.cluster.local.
+# Grafana and Alertmanager are same-port aliases; Prometheus needs an HTTP
+# rewrite of /api/v1 → /select/0/prometheus/api/v1 (see vmselect-prometheus).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmks-grafana
+  namespace: cattle-monitoring-system
+spec:
+  type: ExternalName
+  externalName: vmks-grafana.monitoring.svc.cluster.local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalertmanager-vmks
+  namespace: cattle-monitoring-system
+spec:
+  type: ExternalName
+  externalName: vmalertmanager-vmks.monitoring.svc.cluster.local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmselect-prometheus
+  namespace: cattle-monitoring-system
+  labels:
+    app.kubernetes.io/name: vmselect-prometheus
+    app.kubernetes.io/part-of: rancher-monitoring-dashboards
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vmselect-prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http
+      protocol: TCP

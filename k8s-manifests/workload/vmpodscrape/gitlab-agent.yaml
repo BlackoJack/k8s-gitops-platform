@@ -1,0 +1,24 @@
+# agentk observability (default :8080 /metrics). Readiness is the KAS tunnel.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: gitlab-agent
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - gitlab-agent
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gitlab-agent
+  podMetricsEndpoints:
+    - port: observability
+      path: /metrics
+      interval: 30s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-agent
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

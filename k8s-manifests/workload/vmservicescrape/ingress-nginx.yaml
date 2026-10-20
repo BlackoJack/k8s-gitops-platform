@@ -1,0 +1,29 @@
+# honorLabels stays false: official/Rancher nginx dashboards treat scrape
+# namespace as controller ns and the metric's original namespace as
+# exported_namespace (ingress ns).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: rke2-ingress-nginx
+  namespace: monitoring
+spec:
+  jobLabel: app.kubernetes.io/name
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rke2-ingress-nginx
+      app.kubernetes.io/component: controller
+      monitoring.corp.example/scrape: "true"
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: ingress-nginx
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

@@ -1,0 +1,27 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+spec:
+  interval: 30m
+  chartRef:
+    kind: OCIRepository
+    name: jetstack
+    namespace: flux-system
+  targetNamespace: cert-manager
+  install:
+    createNamespace: true
+  upgrade:
+    crds: CreateReplace
+  values:
+    crds:
+      enabled: true
+    prometheus:
+      enabled: true
+      servicemonitor:
+        enabled: false
+    extraArgs:
+      - --dns01-recursive-nameservers-only
+      - --dns01-recursive-nameservers=77.88.8.8:53,77.88.8.1:53

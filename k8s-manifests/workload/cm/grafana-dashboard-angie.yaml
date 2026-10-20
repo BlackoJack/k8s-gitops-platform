@@ -1,0 +1,625 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-angie
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Uptime
+data:
+  angie.json: |
+    {
+      "uid": "angie",
+      "title": "Angie",
+      "description": "Оба балансера. Трафик и коды — /p8s. Доступность, TLS и время ответа — blackbox по каждому https server_name через каждый балансер (job=angie-vhost).",
+      "tags": ["platform", "uptime", "angie"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "editable": true,
+      "graphTooltip": 1,
+      "fiscalYearStartMonth": 0,
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "dashboard",
+          "keepTime": true,
+          "targetBlank": false,
+          "title": "Uptime",
+          "type": "link",
+          "url": "/d/uptime-http"
+        },
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "targetBlank": true,
+          "title": "Alertmanager",
+          "type": "link",
+          "url": "https://alertmanager.msk.corp.example"
+        }
+      ],
+      "time": { "from": "now-6h", "to": "now" },
+      "timepicker": { "refresh_intervals": ["30s", "1m", "5m", "15m", "30m"] },
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": { "text": "VictoriaMetrics Prometheus", "value": "VictoriaMetricsProm" },
+            "hide": 0
+          },
+          {
+            "name": "instance",
+            "label": "Балансер",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(up{job=\"angie\"}, instance)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "zone",
+            "label": "Vhost",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(angie_http_server_zones_requests_total{job=\"angie\",instance=~\"$instance\"}, zone)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "upstream",
+            "label": "Upstream",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(angie_http_upstreams_peers_state{job=\"angie\",instance=~\"$instance\"}, upstream)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "code",
+            "label": "Код",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(angie_http_server_zones_responses{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\"}, code)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 3,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Балансеры",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+          "collapsed": false
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Scrape",
+          "description": "up{job=angie}. DOWN — /p8s с этого балансера не снимается.",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "up{job=\"angie\",instance=~\"$instance\"}", "legendFormat": "{{instance}}" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "нет данных",
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Peers недоступны",
+          "description": "HTTP state 3 (max_fails) или 5 (health_check) и stream state 3. Выключенные в конфиге (state 2) не считаются.",
+          "gridPos": { "h": 4, "w": 4, "x": 6, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "expr": "count(angie_http_upstreams_peers_state{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"} == 3 or angie_http_upstreams_peers_state{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"} == 5 or angie_stream_upstreams_peers_state{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"} == 3) or vector(0)"
+          }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "noValue": "0",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Запросы",
+          "gridPos": { "h": 4, "w": 4, "x": 10, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(rate(angie_http_server_zones_requests_total{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\"}[5m]))" }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "decimals": 1,
+              "noValue": "нет данных",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Доля 5xx",
+          "description": "Ответы 5xx к числу запросов по выбранным vhost. Нет ряда 5xx — это 0, а не пустота.",
+          "gridPos": { "h": 4, "w": 4, "x": 14, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "expr": "100 * (sum(rate(angie_http_server_zones_responses{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\",code=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(angie_http_server_zones_requests_total{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\"}[5m])), 0.001)"
+          }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 2,
+              "noValue": "нет данных",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Соединения",
+          "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(angie_connections_active{job=\"angie\",instance=~\"$instance\"})" }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "noValue": "нет данных",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Алерты",
+          "description": "Сейчас firing: AngieScrapeFailed, AngieUpstreamPeerDown, AngieUpstreamDown.",
+          "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(ALERTS{alertname=~\"AngieScrapeFailed|AngieUpstreamDown|AngieUpstreamPeerDown\",alertstate=\"firing\",instance=~\"$instance\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "noValue": "0",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 10,
+          "type": "row",
+          "title": "Upstream",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+          "collapsed": false
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "HTTP peers",
+          "description": "Один ряд на балансер и peer. State 1 — up. Фильтр колонок включён: можно оставить только «недоступен».",
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "format": "table",
+            "instant": true,
+            "expr": "label_join(label_replace(angie_http_upstreams_peers_state{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"}, \"col\", \"State\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"upstream\", \"peer\") or label_join(label_replace(angie_http_upstreams_peers_selected_current{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"}, \"col\", \"In flight\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"upstream\", \"peer\") or label_join(label_replace(rate(angie_http_upstreams_peers_selected_total{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"}[5m]), \"col\", \"RPS\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"upstream\", \"peer\") or label_join(label_replace(sum by (instance, upstream, peer) (rate(angie_http_upstreams_peers_responses{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\",code=~\"5..\"}[5m])), \"col\", \"5xx/s\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"upstream\", \"peer\") or label_join(label_replace(rate(angie_http_upstreams_peers_health_fails{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"}[5m]), \"col\", \"Fails/s\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"upstream\", \"peer\")"
+          }],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "sortBy": [{ "displayName": "State", "desc": true }]
+          },
+          "fieldConfig": {
+            "defaults": { "custom": { "filterable": true, "align": "center" } },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Peer" },
+                "properties": [
+                  { "id": "custom.align", "value": "left" },
+                  { "id": "custom.width", "value": 520 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "State" },
+                "properties": [
+                  { "id": "decimals", "value": 0 },
+                  { "id": "custom.width", "value": 180 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
+                  {
+                    "id": "mappings",
+                    "value": [{
+                      "type": "value",
+                      "options": {
+                        "1": { "text": "UP", "color": "green" },
+                        "2": { "text": "выключен", "color": "gray" },
+                        "3": { "text": "недоступен", "color": "red" },
+                        "4": { "text": "восстановление", "color": "yellow" },
+                        "5": { "text": "unhealthy", "color": "red" },
+                        "6": { "text": "проверка", "color": "blue" },
+                        "7": { "text": "draining", "color": "purple" },
+                        "8": { "text": "занят", "color": "orange" }
+                      }
+                    }]
+                  }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "RPS" },
+                "properties": [
+                  { "id": "unit", "value": "reqps" },
+                  { "id": "decimals", "value": 2 },
+                  { "id": "custom.width", "value": 110 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "In flight" },
+                "properties": [
+                  { "id": "decimals", "value": 0 },
+                  { "id": "custom.width", "value": 110 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "5xx/s" },
+                "properties": [
+                  { "id": "unit", "value": "reqps" },
+                  { "id": "decimals", "value": 3 },
+                  { "id": "custom.width", "value": 110 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 1 }] } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Fails/s" },
+                "properties": [
+                  { "id": "unit", "value": "reqps" },
+                  { "id": "decimals", "value": 3 },
+                  { "id": "custom.width", "value": 110 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.05 }, { "color": "red", "value": 0.5 }] } }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            { "id": "filterFieldsByName", "options": { "include": { "pattern": "/^(row|col|Value)$/" } } },
+            { "id": "groupingToMatrix", "options": { "columnField": "col", "rowField": "row", "valueField": "Value" } },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true },
+                "indexByName": { "row": 0, "State": 1, "RPS": 2, "In flight": 3, "5xx/s": 4, "Fails/s": 5 },
+                "renameByName": { "row": "Peer" }
+              }
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "state-timeline",
+          "title": "Peers не в UP",
+          "description": "Peer не в state 1. Пока таких нет, ряд «все UP», чтобы панель не оставалась пустой.",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "expr": "(angie_http_upstreams_peers_state{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"} != 1) or label_replace((up{job=\"angie\",instance=~\"$instance\"} * 0 unless on() count(angie_http_upstreams_peers_state{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"} != 1)), \"upstream\", \"все UP\", \"instance\", \".*\")",
+            "legendFormat": "{{instance}} / {{upstream}} / {{peer}}"
+          }],
+          "options": {
+            "mergeValues": true,
+            "showValue": "never",
+            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "single" }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "все UP",
+              "mappings": [{
+                "type": "value",
+                "options": {
+                  "0": { "text": "все UP", "color": "green" },
+                  "2": { "text": "выключен", "color": "gray" },
+                  "3": { "text": "недоступен", "color": "red" },
+                  "4": { "text": "восстановление", "color": "yellow" },
+                  "5": { "text": "unhealthy", "color": "red" },
+                  "6": { "text": "проверка", "color": "blue" },
+                  "7": { "text": "draining", "color": "purple" },
+                  "8": { "text": "занят", "color": "orange" }
+                }
+              }],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }] },
+              "custom": { "fillOpacity": 80, "lineWidth": 0, "spanNulls": false }
+            }
+          }
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "RPS по peer (top 20)",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "expr": "topk(20, sum by (instance, upstream, peer) (rate(angie_http_upstreams_peers_selected_total{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\"}[5m])))",
+            "legendFormat": "{{instance}} {{upstream}} {{peer}}"
+          }],
+          "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 15, "lineWidth": 1, "spanNulls": true, "drawStyle": "line", "showPoints": "never" } } }
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "5xx от upstream",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "expr": "sum by (instance, upstream) (rate(angie_http_upstreams_peers_responses{job=\"angie\",instance=~\"$instance\",upstream=~\"$upstream\",code=~\"5..\"}[5m]))",
+            "legendFormat": "{{instance}} {{upstream}}"
+          }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 25, "lineWidth": 1, "spanNulls": true, "stacking": { "mode": "normal" } } } }
+        },
+        {
+          "id": 20,
+          "type": "row",
+          "title": "Виртуальные хосты",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
+          "collapsed": false
+        },
+        {
+          "id": 21,
+          "type": "table",
+          "title": "Server zones",
+          "description": "Каждый status_zone на каждом балансере. Это и есть хосты из конфига: k8s и остальные, если у server задан status_zone.",
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 35 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "format": "table",
+            "instant": true,
+            "expr": "label_join(label_replace(sum by (instance, zone) (rate(angie_http_server_zones_requests_total{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\"}[5m])), \"col\", \"RPS\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"zone\") or label_join(label_replace(sum by (instance, zone) (rate(angie_http_server_zones_responses{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\",code=~\"5..\"}[5m])), \"col\", \"5xx/s\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"zone\") or label_join(label_replace(sum by (instance, zone) (rate(angie_http_server_zones_responses{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\",code=~\"4..\"}[5m])), \"col\", \"4xx/s\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"zone\") or label_join(label_replace(angie_http_server_zones_requests_processing{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\"}, \"col\", \"Active\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"zone\") or label_join(label_replace(rate(angie_http_server_zones_requests_discarded{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\"}[5m]), \"col\", \"Discarded/s\", \"instance\", \".*\"), \"row\", \" / \", \"instance\", \"zone\")"
+          }],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "sortBy": [{ "displayName": "5xx/s", "desc": true }]
+          },
+          "fieldConfig": {
+            "defaults": { "custom": { "filterable": true, "align": "center" } },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Vhost" },
+                "properties": [
+                  { "id": "custom.align", "value": "left" },
+                  { "id": "custom.width", "value": 480 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "RPS" },
+                "properties": [{ "id": "unit", "value": "reqps" }, { "id": "decimals", "value": 2 }, { "id": "custom.width", "value": 120 }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "5xx/s" },
+                "properties": [
+                  { "id": "unit", "value": "reqps" },
+                  { "id": "decimals", "value": 3 },
+                  { "id": "custom.width", "value": 120 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 1 }] } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "4xx/s" },
+                "properties": [{ "id": "unit", "value": "reqps" }, { "id": "decimals", "value": 3 }, { "id": "custom.width", "value": 120 }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Active" },
+                "properties": [{ "id": "decimals", "value": 0 }, { "id": "custom.width", "value": 110 }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Discarded/s" },
+                "properties": [
+                  { "id": "unit", "value": "reqps" },
+                  { "id": "decimals", "value": 3 },
+                  { "id": "custom.width", "value": 140 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 1 }] } }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            { "id": "filterFieldsByName", "options": { "include": { "pattern": "/^(row|col|Value)$/" } } },
+            { "id": "groupingToMatrix", "options": { "columnField": "col", "rowField": "row", "valueField": "Value" } },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true },
+                "indexByName": { "row": 0, "RPS": 1, "5xx/s": 2, "4xx/s": 3, "Active": 4, "Discarded/s": 5 },
+                "renameByName": { "row": "Vhost" }
+              }
+            }
+          ]
+        },
+        {
+          "id": 22,
+          "type": "timeseries",
+          "title": "RPS по vhost (top 20)",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 47 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "expr": "topk(20, sum by (instance, zone) (rate(angie_http_server_zones_requests_total{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\"}[5m])))",
+            "legendFormat": "{{instance}} {{zone}}"
+          }],
+          "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10, "lineWidth": 1, "spanNulls": true, "showPoints": "never" } } }
+        },
+        {
+          "id": 23,
+          "type": "timeseries",
+          "title": "Коды ответов",
+          "description": "Стек по vhost и коду. Список «Код» сверху фильтрует этот график, можно выбрать несколько. Топ 20.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 47 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "expr": "topk(20, sum by (instance, zone, code) (rate(angie_http_server_zones_responses{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\",code=~\"$code\"}[5m])))",
+            "legendFormat": "{{instance}} {{zone}} {{code}}"
+          }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 40, "lineWidth": 1, "spanNulls": true, "stacking": { "mode": "normal" } } } }
+        },
+        {
+          "id": 30,
+          "type": "row",
+          "title": "Трафик",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 55 },
+          "collapsed": false
+        },
+        {
+          "id": 31,
+          "type": "timeseries",
+          "title": "Соединения",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 56 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "angie_connections_active{job=\"angie\",instance=~\"$instance\"}", "legendFormat": "{{instance}} active" },
+            { "refId": "B", "expr": "angie_connections_idle{job=\"angie\",instance=~\"$instance\"}", "legendFormat": "{{instance}} idle" }
+          ],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 15, "lineWidth": 1, "spanNulls": true, "showPoints": "never" } } }
+        },
+        {
+          "id": 32,
+          "type": "timeseries",
+          "title": "Исходящий трафик к клиентам",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "expr": "sum by (instance) (rate(angie_http_server_zones_data_sent{job=\"angie\",instance=~\"$instance\",zone=~\"$zone\"}[5m]))",
+            "legendFormat": "{{instance}}"
+          }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "Bps", "custom": { "fillOpacity": 20, "lineWidth": 1, "spanNulls": true, "showPoints": "never" } } }
+        },
+        {
+          "id": 40,
+          "type": "row",
+          "title": "Доступность",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 64 },
+          "collapsed": false
+        },
+        {
+          "id": 41,
+          "type": "stat",
+          "title": "Не отвечают",
+          "description": "Проба через конкретный балансер. Успех: 2xx, 3xx, 401, 403. Для api.* ещё и 404 на /. Если location / в конфиге — return 404, проверяются точные location.",
+          "gridPos": { "h": 4, "w": 8, "x": 0, "y": 65 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(probe_success{job=\"angie-vhost\",balancer=~\"$instance\",vhost=~\"$zone\"} == 0) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "decimals": 0, "noValue": "0", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } }
+        },
+        {
+          "id": 42,
+          "type": "stat",
+          "title": "Сертификат, мин.",
+          "gridPos": { "h": 4, "w": 8, "x": 8, "y": 65 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min((probe_ssl_earliest_cert_expiry{job=\"angie-vhost\",balancer=~\"$instance\",vhost=~\"$zone\"} - time()) / 86400)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "unit": "suffix:d", "decimals": 0, "noValue": "нет данных", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 14 }, { "color": "green", "value": 30 }] } } }
+        },
+        {
+          "id": 43,
+          "type": "stat",
+          "title": "Самый медленный",
+          "gridPos": { "h": 4, "w": 8, "x": 16, "y": 65 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "max(probe_duration_seconds{job=\"angie-vhost\",balancer=~\"$instance\",vhost=~\"$zone\"})" }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "unit": "s", "decimals": 2, "noValue": "нет данных", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 2 }, { "color": "red", "value": 5 }] } } }
+        },
+        {
+          "id": 44,
+          "type": "table",
+          "title": "Пробы vhost",
+          "description": "Строка — балансер и проверяемый адрес. У health.corp.example это /healthz и /readyz, у остальных — /.",
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 69 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "format": "table",
+            "instant": true,
+            "expr": "label_join(label_replace(probe_success{job=\"angie-vhost\",balancer=~\"$instance\",vhost=~\"$zone\"}, \"col\", \"Status\", \"vhost\", \".*\"), \"row\", \" / \", \"balancer\", \"endpoint\") or label_join(label_replace(probe_http_status_code{job=\"angie-vhost\",balancer=~\"$instance\",vhost=~\"$zone\"}, \"col\", \"HTTP\", \"vhost\", \".*\"), \"row\", \" / \", \"balancer\", \"endpoint\") or label_join(label_replace(probe_duration_seconds{job=\"angie-vhost\",balancer=~\"$instance\",vhost=~\"$zone\"}, \"col\", \"Latency\", \"vhost\", \".*\"), \"row\", \" / \", \"balancer\", \"endpoint\") or label_join(label_replace((probe_ssl_earliest_cert_expiry{job=\"angie-vhost\",balancer=~\"$instance\",vhost=~\"$zone\"} - time()) / 86400, \"col\", \"TLS days\", \"vhost\", \".*\"), \"row\", \" / \", \"balancer\", \"endpoint\")"
+          }],
+          "options": { "showHeader": true, "cellHeight": "sm", "sortBy": [{ "displayName": "Status", "desc": false }] },
+          "fieldConfig": {
+            "defaults": { "custom": { "filterable": true, "align": "center" } },
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "Vhost" }, "properties": [{ "id": "custom.align", "value": "left" }, { "id": "custom.width", "value": 420 }] },
+              { "matcher": { "id": "byName", "options": "Status" }, "properties": [{ "id": "custom.width", "value": 110 }, { "id": "custom.cellOptions", "value": { "type": "color-background" } }, { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }] }] },
+              { "matcher": { "id": "byName", "options": "HTTP" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "custom.width", "value": 100 }, { "id": "custom.cellOptions", "value": { "type": "color-background" } }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 200 }, { "color": "orange", "value": 400 }, { "color": "red", "value": 500 }] } }] },
+              { "matcher": { "id": "byName", "options": "Latency" }, "properties": [{ "id": "unit", "value": "s" }, { "id": "decimals", "value": 3 }, { "id": "custom.width", "value": 120 }] },
+              { "matcher": { "id": "byName", "options": "TLS days" }, "properties": [{ "id": "unit", "value": "suffix:d" }, { "id": "decimals", "value": 0 }, { "id": "custom.width", "value": 120 }, { "id": "custom.cellOptions", "value": { "type": "color-background" } }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 14 }, { "color": "green", "value": 30 }] } }] }
+            ]
+          },
+          "transformations": [
+            { "id": "filterFieldsByName", "options": { "include": { "pattern": "/^(row|col|Value)$/" } } },
+            { "id": "groupingToMatrix", "options": { "columnField": "col", "rowField": "row", "valueField": "Value" } },
+            { "id": "organize", "options": { "excludeByName": { "Time": true }, "indexByName": { "row": 0, "Status": 1, "HTTP": 2, "Latency": 3, "TLS days": 4 }, "renameByName": { "row": "Vhost" } } }
+          ]
+        },
+        {
+          "id": 45,
+          "type": "timeseries",
+          "title": "Время ответа",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 81 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "probe_duration_seconds{job=\"angie-vhost\",balancer=~\"$instance\",vhost=~\"$zone\"}", "legendFormat": "{{balancer}} {{endpoint}}" }],
+          "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 1, "spanNulls": true, "showPoints": "never" } } }
+        }
+      ]
+    }

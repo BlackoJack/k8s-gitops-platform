@@ -1,0 +1,62 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: minio
+  namespace: minio
+spec:
+  interval: 5m
+  timeout: 30m
+  releaseName: minio
+  chart:
+    spec:
+      chart: minio
+      version: ">=5.4.0"
+      sourceRef:
+        kind: HelmRepository
+        name: minio
+        namespace: flux-system
+
+  install:
+    createNamespace: true
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+
+  values:
+    mode: standalone
+
+    persistence:
+      enabled: true
+      storageClass: ha-nfs
+      size: 100Gi
+
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+
+    rootUser: minioadmin
+    rootPassword: "REDACTED"
+
+    ingress:
+      enabled: true
+      annotations:
+        kubernetes.io/ingress.class: cilium
+      hosts:
+        - minio.msk.corp.example
+      tls:
+        - hosts:
+            - minio.msk.corp.example
+
+    consoleIngress:
+      enabled: true
+      annotations:
+        kubernetes.io/ingress.class: cilium
+      hosts:
+        - minio-admin.msk.corp.example
+      tls:
+        - hosts:
+            - minio-admin.msk.corp.example

@@ -1,0 +1,26 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: domain-exporter
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: domain-exporter
+      monitoring.corp.example/scrape: "true"
+  endpoints:
+    - port: http
+      path: /metrics
+      # WHOIS/RDAP are cached 1h in the exporter; scrape often for Grafana freshness.
+      interval: 30s
+      scrapeTimeout: 25s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: domain-exporter
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

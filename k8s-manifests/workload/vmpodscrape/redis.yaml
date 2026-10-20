@@ -1,0 +1,36 @@
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: redis-app
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - redis-staging
+      - redis-production
+  selector:
+    matchLabels:
+      role: replication
+  podMetricsEndpoints:
+    - port: redis-exporter
+      path: /metrics
+      interval: 30s
+      honorLabels: true
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: redis-operator
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - redis-operator
+  selector:
+    matchLabels:
+      name: redis-operator
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

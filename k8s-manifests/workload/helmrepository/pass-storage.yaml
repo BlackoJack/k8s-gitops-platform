@@ -1,0 +1,16 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: pass-storage
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: oci://registry.corp.example/platform/pass/charts/pass-storage
+  layerSelector:
+    mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+    operation: extract
+  ref:
+    semver: "0.2.11"
+  secretRef:
+    name: pass-storage-secret
+  provider: generic

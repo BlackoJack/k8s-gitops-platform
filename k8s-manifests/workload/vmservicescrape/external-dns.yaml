@@ -1,0 +1,25 @@
+# Chart ServiceMonitor is off; VM operator scrapes the chart Service (:7979).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: external-dns
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - external-dns
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: external-dns
+      monitoring.corp.example/scrape: "true"
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: external-dns
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

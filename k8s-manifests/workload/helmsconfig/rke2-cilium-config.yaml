@@ -1,0 +1,166 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-cilium
+  namespace: kube-system
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  valuesContent: |-
+    kubeProxyReplacement: true
+    k8sServiceHost: "localhost"
+    k8sServicePort: "6443"
+
+    # --- Datapath: native L2 routing (no VXLAN overhead) ---
+    # Nodes are on the same L2 segment (L2 announcements / LB IPAM).
+    # Verify cluster-cidr matches (RKE2 default 10.42.0.0/16).
+    routingMode: native
+    autoDirectNodeRoutes: true
+    ipv4NativeRoutingCIDR: "10.42.0.0/16"
+
+    # Match L2AnnouncementPolicy interfaces
+    devices: "eth+ ens+"
+
+    bpf:
+      masquerade: true
+      # false = eBPF host-routing (bypass iptables/host stack). Old key hostRouting was invalid.
+      hostLegacyRouting: false
+      # Must match Cluster.spec.rkeConfig.chartValues.rke2-cilium (Rancher
+      # helm-install applies chartValues first and overwrites this overlay).
+      datapathMode: netkit
+      distributedLRU:
+        enabled: true
+      # 8Gi nodes: 0.08 + preallocate left the agent at 1.5–1.9Gi with
+      # empty requests; scheduler packed other pods to 99% allocatable.
+      mapDynamicSizeRatio: 0.02
+      preallocateMaps: false
+      monitorAggregation: maximum
+      monitorInterval: "10s"
+      enableTCX: true
+      lbMapMax: 131072
+      events:
+        monitorInterval: "10s"
+
+    # jiffies-based CT clock probe (cheaper than ktime)
+    bpfClockProbe: true
+
+    # BIG TCP: mlx4/mlx5/ice GRO/GSO only. Nodes are virtio_net (PVE) —
+    # cilium status shows IPv4 BIG TCP: Disabled. Do not enable.
+    enableIPv4BIGTCP: false
+
+    # No-op with eBPF host-routing (hostLegacyRouting: false): packets
+    # never hit iptables, Cilium forces this false in cilium-config.
+    installNoConntrackIptablesRules: false
+    # BPF host-routing is on → no need for xt_socket fallback
+    enableXTSocketFallback: false
+
+    # Bandwidth Manager + BBR (matches host: net.core.default_qdisc=fq, tcp_congestion_control=bbr)
+    bandwidthManager:
+      enabled: true
+      bbr: true
+
+    loadBalancer:
+      algorithm: maglev
+      # DSR for TCP, SNAT for UDP. hybrid + geneve unsupported; use opt.
+      # (full DSR+geneve: mode=dsr + dsrDispatch=geneve)
+      mode: hybrid
+      dsrDispatch: opt
+      # XDP on NICs that support it; skip others (safer than native-only)
+      acceleration: best-effort
+
+    maglev:
+      tableSize: 65521
+      hashSeed: "REQHQO0cg96s/gam"
+
+    l2announcements:
+      enabled: true
+
+    prometheus:
+      enabled: true
+      metricsService: true
+      serviceMonitor:
+        enabled: false
+
+    envoy:
+      prometheus:
+        enabled: true
+        serviceMonitor:
+          enabled: false
+
+    dashboards:
+      enabled: true
+      namespace: monitoring
+      label: grafana_dashboard
+      labelValue: "1"
+      annotations:
+        grafana_folder: Cilium
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+
+    operator:
+      prometheus:
+        enabled: true
+        metricsService: true
+        serviceMonitor:
+          enabled: false
+      dashboards:
+        enabled: true
+        namespace: monitoring
+        label: grafana_dashboard
+        labelValue: "1"
+        annotations:
+          grafana_folder: Cilium
+
+    hubble:
+      enabled: true
+      eventQueueSize: 32768
+      metrics:
+        enableOpenMetrics: true
+        enabled:
+          - "dns:query;sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload"
+          - "drop:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+          - "tcp:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+          - "flow:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+          - "icmp:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+          - "httpV2:exemplars=true;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+        serviceMonitor:
+          enabled: false
+        dashboards:
+          enabled: true
+          namespace: monitoring
+          label: grafana_dashboard
+          labelValue: "1"
+          annotations:
+            grafana_folder: Hubble
+      relay:
+        enabled: true
+      ui:
+        enabled: true
+        ingress:
+          enabled: false
+        service:
+          type: LoadBalancer
+          labels:
+            io.cilium/lb-managed: "true"
+            external-dns.corp.example/enabled: "true"
+          annotations:
+            lbipam.cilium.io/ips: "10.16.0.204"
+            external-dns.alpha.kubernetes.io/hostname: hubble.msk.corp.example
+
+    ingressController:
+      enabled: true
+      default: true
+      loadbalancerMode: shared
+      defaultSecretNamespace: kube-system
+      defaultSecretName: msk-corp-wildcard
+      service:
+        type: LoadBalancer
+        labels:
+          io.cilium/lb-managed: "true"
+        annotations:
+          lbipam.cilium.io/ips: "10.16.0.203"

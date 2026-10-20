@@ -1,0 +1,95 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cert-manager
+  namespace: monitoring
+spec:
+  groups:
+    - name: cert-manager
+      rules:
+        # honorLabels=false: Certificate ns is exported_namespace, scrape ns is namespace.
+        - alert: CertManagerDown
+          expr: up{job="cert-manager"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "cert-manager не скрейпится на {{ $labels.cluster }}"
+            description: "up{job=cert-manager}=0 на {{ $labels.cluster }}, под {{ $labels.pod }}. Нет метрик сертификатов и issuer'ов."
+            dashboard: "https://grafana.msk.corp.example/d/cert-manager?var-cluster={{ $labels.cluster | urlquery }}"
+
+        - alert: CertManagerCertExpiringSoon
+          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) / 86400 < 14
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Сертификат {{ $labels.exported_namespace }}/{{ $labels.name }} истекает через {{ $value | humanize }} дней"
+            description: "{{ $labels.cluster }}: Certificate {{ $labels.exported_namespace }}/{{ $labels.name }} (issuer {{ $labels.issuer_name }}) истечёт менее чем через 14 дней. Проверьте ACME issuer и DNS-01."
+            dashboard: "https://grafana.msk.corp.example/d/cert-manager?var-cluster={{ $labels.cluster | urlquery }}&var-namespace={{ $labels.exported_namespace | urlquery }}&var-cert={{ $labels.name | urlquery }}"
+
+        - alert: CertManagerCertExpired
+          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) < 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Сертификат {{ $labels.exported_namespace }}/{{ $labels.name }} истёк"
+            description: "{{ $labels.cluster }}: {{ $labels.exported_namespace }}/{{ $labels.name }} уже истёк. HTTPS будет отклоняться клиентами."
+            dashboard: "https://grafana.msk.corp.example/d/cert-manager?var-cluster={{ $labels.cluster | urlquery }}&var-namespace={{ $labels.exported_namespace | urlquery }}&var-cert={{ $labels.name | urlquery }}"
+
+        - alert: CertManagerCertNotReady
+          expr: certmanager_certificate_ready_status{condition="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Сертификат {{ $labels.exported_namespace }}/{{ $labels.name }} не Ready"
+            description: "{{ $labels.cluster }}: Certificate не Ready уже 15+ минут (issuer {{ $labels.issuer_name }}). Проверьте Certificate/Order и логи cert-manager."
+            dashboard: "https://grafana.msk.corp.example/d/cert-manager?var-cluster={{ $labels.cluster | urlquery }}&var-namespace={{ $labels.exported_namespace | urlquery }}&var-cert={{ $labels.name | urlquery }}"
+
+        - alert: CertManagerClusterIssuerNotReady
+          expr: certmanager_clusterissuer_ready_status{condition="False"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClusterIssuer {{ $labels.name }} не Ready"
+            description: "{{ $labels.cluster }}: ClusterIssuer {{ $labels.name }} в False уже 10+ минут. ACME/DNS-01 не выпустят новые сертификаты."
+            dashboard: "https://grafana.msk.corp.example/d/cert-manager?var-cluster={{ $labels.cluster | urlquery }}"
+
+        - alert: CertManagerIssuerNotReady
+          expr: certmanager_issuer_ready_status{condition="False"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Issuer {{ $labels.exported_namespace }}/{{ $labels.name }} не Ready"
+            description: "{{ $labels.cluster }}: namespaced Issuer {{ $labels.exported_namespace }}/{{ $labels.name }} в False уже 10+ минут."
+            dashboard: "https://grafana.msk.corp.example/d/cert-manager?var-cluster={{ $labels.cluster | urlquery }}"
+
+        - alert: CertManagerAcmeHttpErrors
+          expr: |
+            sum by (cluster, host, action, status) (
+              increase(certmanager_http_acme_client_request_count{status!~"2.."}[15m])
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ACME {{ $labels.status }} на {{ $labels.host }} ({{ $labels.action }})"
+            description: "{{ $labels.cluster }}: Let's Encrypt/ACME отвечает {{ $labels.status }} на {{ $labels.action }}. Rate limit, DNS-01 или недоступность acme-v02.api.letsencrypt.org."
+            dashboard: "https://grafana.msk.corp.example/d/cert-manager?var-cluster={{ $labels.cluster | urlquery }}"
+
+        - alert: CertManagerControllerSyncErrors
+          expr: |
+            sum by (cluster, controller) (
+              increase(certmanager_controller_sync_error_count[15m])
+            ) >= 3
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "cert-manager {{ $labels.controller }}: ошибки sync"
+            description: "{{ $labels.cluster }}: {{ $value | humanize }} ошибок reconcile у контроллера {{ $labels.controller }} за 15м. Смотрите логи cert-manager-controller."
+            dashboard: "https://grafana.msk.corp.example/d/cert-manager?var-cluster={{ $labels.cluster | urlquery }}"

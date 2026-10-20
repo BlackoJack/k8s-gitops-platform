@@ -1,0 +1,43 @@
+# The main app is probed per balancer as job=angie-vhost.
+# External HTTP uptime probes. Append URLs under targets.static.targets.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: uptime-http
+  namespace: monitoring
+spec:
+  jobName: uptime-http
+  interval: 1m
+  scrapeTimeout: 30s
+  module: http_200
+  vmProberSpec:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    static:
+      labels:
+        probe: uptime
+      targets:
+        - https://app.example.com
+        - https://app.corp.example/api
+        - https://gitlab.corp.example/users/sign_in
+        - https://gitlab.corp.example/-/health
+---
+# Session API requires a client id header (see blackbox module http_200_app_session).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: uptime-http-app-session
+  namespace: monitoring
+spec:
+  jobName: uptime-http
+  interval: 1m
+  scrapeTimeout: 30s
+  module: http_200_app_session
+  vmProberSpec:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    static:
+      labels:
+        probe: uptime
+      targets:
+        - https://app.example.com/api/v1/session

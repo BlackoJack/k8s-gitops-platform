@@ -1,0 +1,47 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cilium
+  namespace: monitoring
+spec:
+  groups:
+    - name: cilium
+      rules:
+        - alert: CiliumHighDropRate
+          expr: |
+            sum by (cluster, reason) (rate(cilium_drop_count_total[5m])) > 100
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cilium drops {{ $labels.reason }} на {{ $labels.cluster }}"
+            description: "Скорость дропов Cilium >100/s (reason={{ $labels.reason }}). Проверьте network policies и Hubble."
+        - alert: CiliumAgentUnhealthy
+          expr: |
+            max by (cluster) (cilium_unreachable_nodes)
+            >
+            (
+              count by (cluster) (kube_node_status_condition{condition="Ready",status="true"} == 0)
+              or on (cluster) (max by (cluster) (cilium_unreachable_nodes) * 0)
+            )
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Cilium не видит ноды на {{ $labels.cluster }}"
+            description: "unreachable={{ $value }} сверх числа NotReady нод. Если нода просто в reboot — алерт не должен гореть."
+        - alert: CiliumHttpHighErrorRate
+          expr: |
+            sum by (cluster, destination_namespace, destination_workload) (
+              rate(hubble_http_requests_total{status=~"5.."}[5m])
+            )
+            /
+            sum by (cluster, destination_namespace, destination_workload) (
+              rate(hubble_http_requests_total[5m])
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "HTTP 5xx >5% на {{ $labels.destination_namespace }}/{{ $labels.destination_workload }}"
+            description: "Hubble httpV2: доля ответов 5xx выше 5% на кластере {{ $labels.cluster }}. Это включает Cilium Ingress → backend."

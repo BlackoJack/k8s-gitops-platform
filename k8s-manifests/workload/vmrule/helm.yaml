@@ -1,0 +1,166 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: helm
+  namespace: monitoring
+spec:
+  groups:
+    - name: helm
+      rules:
+        # Helm 3 writes sh.helm.release.v1.* as soon as it stores the revision.
+        # Without --wait that is BEFORE pods pass readiness, so secret
+        # status=deployed is not "the app is live". Notify only after every
+        # Deployment/StatefulSet in the namespace has its spec replicas available.
+        # Skip platform namespaces: gitops of this repo (vmks) is not an app deploy.
+        - alert: HelmReleaseDeployed
+          expr: |
+            (
+              (time() - kube_secret_created{
+                cluster="workload",
+                job="kube-state-metrics",
+                namespace!~"kube-system|cattle-.*|monitoring|flux-system|cert-manager"
+              }) < 30 * 60
+            )
+            * on (cluster, namespace, secret) group_left ()
+              kube_secret_type{
+                cluster="workload",
+                job="kube-state-metrics",
+                type="helm.sh/release.v1",
+                namespace!~"kube-system|cattle-.*|monitoring|flux-system|cert-manager"
+              }
+            * on (cluster, namespace, secret) group_left (release, revision, helm_status)
+              label_replace(
+                label_replace(
+                  label_replace(
+                    kube_secret_labels{
+                      cluster="workload",
+                      job="kube-state-metrics",
+                      label_owner="helm",
+                      label_status="deployed",
+                      namespace!~"kube-system|cattle-.*|monitoring|flux-system|cert-manager"
+                    },
+                    "release", "$1", "label_name", "(.+)"
+                  ),
+                  "revision", "$1", "label_version", "(.+)"
+                ),
+                "helm_status", "$1", "label_status", "(.+)"
+              )
+            unless on (cluster, namespace)
+            (
+              count by (cluster, namespace) (
+                (
+                  kube_deployment_spec_replicas > 0
+                  and kube_deployment_status_replicas_available < kube_deployment_spec_replicas
+                )
+                or
+                (
+                  kube_statefulset_replicas > 0
+                  and kube_statefulset_status_replicas_ready < kube_statefulset_replicas
+                )
+              ) > 0
+            )
+          for: 2m
+          labels:
+            severity: info
+            kind: HelmRelease
+          annotations:
+            summary: "Helm {{ $labels.release }} r{{ $labels.revision }} (deployed) в {{ $labels.namespace }}"
+            description: "Кластер {{ $labels.cluster }}, namespace {{ $labels.namespace }}, release {{ $labels.release }}, revision {{ $labels.revision }}. Secret {{ $labels.secret }}. Реплики Available — не путать с записью Helm-секрета до readiness."
+
+        - alert: HelmReleaseFailed
+          expr: |
+            (
+              (time() - kube_secret_created{
+                cluster="workload",
+                job="kube-state-metrics",
+                namespace!~"kube-system|cattle-.*|monitoring|flux-system|cert-manager"
+              }) < 30 * 60
+            )
+            * on (cluster, namespace, secret) group_left ()
+              kube_secret_type{
+                cluster="workload",
+                job="kube-state-metrics",
+                type="helm.sh/release.v1",
+                namespace!~"kube-system|cattle-.*|monitoring|flux-system|cert-manager"
+              }
+            * on (cluster, namespace, secret) group_left (release, revision, helm_status)
+              label_replace(
+                label_replace(
+                  label_replace(
+                    kube_secret_labels{
+                      cluster="workload",
+                      job="kube-state-metrics",
+                      label_owner="helm",
+                      label_status="failed",
+                      namespace!~"kube-system|cattle-.*|monitoring|flux-system|cert-manager"
+                    },
+                    "release", "$1", "label_name", "(.+)"
+                  ),
+                  "revision", "$1", "label_version", "(.+)"
+                ),
+                "helm_status", "$1", "label_status", "(.+)"
+              )
+          for: 0m
+          labels:
+            severity: warning
+            kind: HelmRelease
+          annotations:
+            summary: "Helm {{ $labels.release }} r{{ $labels.revision }} FAILED в {{ $labels.namespace }}"
+            description: "Helm пометил revision как failed на {{ $labels.cluster }}. Обычно --wait / probes / apply. Secret {{ $labels.secret }}. Старый workload мог остаться на предыдущей revision."
+
+        # Secret already "deployed" (werf/helm without --wait) but rollout still
+        # has not-ready replicas — readiness/liveness, image pull, crash.
+        - alert: HelmReleaseRolloutStuck
+          expr: |
+            (
+              (time() - kube_secret_created{
+                cluster="workload",
+                job="kube-state-metrics",
+                namespace!~"kube-system|cattle-.*|monitoring|flux-system|cert-manager"
+              }) < 45 * 60
+            )
+            * on (cluster, namespace, secret) group_left ()
+              kube_secret_type{
+                cluster="workload",
+                job="kube-state-metrics",
+                type="helm.sh/release.v1",
+                namespace!~"kube-system|cattle-.*|monitoring|flux-system|cert-manager"
+              }
+            * on (cluster, namespace, secret) group_left (release, revision, helm_status)
+              label_replace(
+                label_replace(
+                  label_replace(
+                    kube_secret_labels{
+                      cluster="workload",
+                      job="kube-state-metrics",
+                      label_owner="helm",
+                      label_status=~"deployed|pending-upgrade|pending-install",
+                      namespace!~"kube-system|cattle-.*|monitoring|flux-system|cert-manager"
+                    },
+                    "release", "$1", "label_name", "(.+)"
+                  ),
+                  "revision", "$1", "label_version", "(.+)"
+                ),
+                "helm_status", "$1", "label_status", "(.+)"
+              )
+            and on (cluster, namespace)
+            (
+              count by (cluster, namespace) (
+                (
+                  kube_deployment_spec_replicas > 0
+                  and kube_deployment_status_replicas_available < kube_deployment_spec_replicas
+                )
+                or
+                (
+                  kube_statefulset_replicas > 0
+                  and kube_statefulset_status_replicas_ready < kube_statefulset_replicas
+                )
+              ) > 0
+            )
+          for: 10m
+          labels:
+            severity: warning
+            kind: HelmRelease
+          annotations:
+            summary: "Helm {{ $labels.release }} r{{ $labels.revision }} не прошёл rollout в {{ $labels.namespace }}"
+            description: "Secret {{ $labels.secret }} в статусе {{ $labels.helm_status }}, но реплики не Available 10+ мин на {{ $labels.cluster }}. Смотрите readiness/liveness, image pull, CrashLoop."

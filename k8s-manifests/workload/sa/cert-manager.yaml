@@ -1,0 +1,80 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-selectel-webhook
+  labels:
+    app.kubernetes.io/managed-by: flux
+rules:
+  - apiGroups: ["acme.corp.example"]
+    resources: ["selectel"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-technitium-webhook
+  labels:
+    app.kubernetes.io/managed-by: flux
+rules:
+  - apiGroups: ["acme.corp.example"]
+    resources: ["technitium"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-selectel-webhook
+  labels:
+    app.kubernetes.io/managed-by: flux
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-selectel-webhook
+subjects:
+  - kind: ServiceAccount
+    name: cert-manager-cert-manager
+    namespace: cert-manager
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-technitium-webhook
+  labels:
+    app.kubernetes.io/managed-by: flux
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-technitium-webhook
+subjects:
+  - kind: ServiceAccount
+    name: cert-manager-cert-manager
+    namespace: cert-manager
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-manager-technitium-webhook-secret-reader
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/managed-by: flux
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["technitium-api-token"] 
+    verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cert-manager-technitium-webhook-secret-reader
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/managed-by: flux
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cert-manager-technitium-webhook-secret-reader
+subjects:
+  - kind: ServiceAccount
+    name: cert-manager-technitium-webhook 
+    namespace: cert-manager

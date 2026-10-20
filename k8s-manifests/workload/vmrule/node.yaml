@@ -1,0 +1,41 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: node
+  namespace: monitoring
+spec:
+  groups:
+    - name: node
+      rules:
+        - alert: NodeUnavailable
+          expr: |
+            kube_node_status_condition{condition="Ready",status="true"} == 0
+            and on (cluster, node)
+            kube_node_spec_unschedulable == 0
+            and on (cluster, node)
+            (time() - kube_node_created) > 15m
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нода {{ $labels.node }} недоступна на {{ $labels.cluster }}"
+            description: "Node NotReady уже минуту. Не scale-up (объект старше 15м) и не CA drain (не cordon)."
+        - alert: NodeRebooted
+          expr: |
+            (
+                (time() - node_boot_time_seconds) < 1h
+              and
+                (node_boot_time_seconds - node_boot_time_seconds offset 1h) > 0
+            )
+            and on (instance, cluster)
+            label_replace(
+              (time() - kube_node_created) > 1h,
+              "instance", "$1", "node", "(.+)"
+            )
+          for: 1m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Нода {{ $labels.instance }} перезагрузилась на {{ $labels.cluster }}"
+            description: "Uptime после reboot {{ $value | humanizeDuration }}."

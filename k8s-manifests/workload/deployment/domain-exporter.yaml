@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: domain-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: domain-exporter
+    app.kubernetes.io/component: exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: domain-exporter
+  template:
+    metadata:
+      annotations:
+        corp.example/domain-exporter-code: metrics-from-cache
+      labels:
+        app.kubernetes.io/name: domain-exporter
+        app.kubernetes.io/component: exporter
+        monitoring.corp.example/scrape: "true"
+    spec:
+      nodeSelector:
+        environment: infra
+      tolerations:
+        - key: environment
+          operator: Equal
+          value: infra
+          effect: PreferNoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: domain-exporter
+          image: python:3.12.10-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "/code/exporter.py"]
+          env:
+            - name: CONFIG
+              value: /config/domains.yaml
+            - name: LISTEN
+              value: ":9222"
+            - name: CACHE_TTL_SECONDS
+              value: "3600"
+            - name: LIST_REFRESH_SECONDS
+              value: "300"
+            - name: TECHNITIUM_URLS
+              value: "http://dns-1.corp.example:5380,http://dns-2.corp.example:5380"
+            - name: TECHNITIUM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: technitium-api-token
+                  key: api-token
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 9222
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 48Mi
+            limits:
+              memory: 96Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: config-code
+              mountPath: /code
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: domain-exporter
+            defaultMode: 0644
+        - name: config-code
+          configMap:
+            name: domain-exporter-code
+            defaultMode: 0644
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: domain-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: domain-exporter
+    monitoring.corp.example/scrape: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: domain-exporter
+  ports:
+    - name: http
+      port: 9222
+      targetPort: http
+      protocol: TCP

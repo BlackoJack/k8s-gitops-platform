@@ -1,0 +1,160 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: werf-runner
+  namespace: gitlab-ci
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: gitlab-runner
+      version: '>=0.86.0'
+      sourceRef:
+        kind: HelmRepository
+        name: gitlab
+        namespace: flux-system
+      interval: 1m
+  install:
+    createNamespace: true
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    image:
+      tag: 'alpine-v19.5.0' # {"$imagepolicy": "flux-system:gitlab-runner:tag"}
+    gitlabUrl: "https://gitlab.corp.example"
+    rbac:
+      create: true
+      clusterWideAccess: true
+    concurrent: 10
+    checkInterval: 3
+    metrics:
+      enabled: true
+      # Scrape is VMPodScrape monitoring/gitlab-runner (not chart PodMonitor).
+      podMonitor:
+        enabled: false
+    resources:
+      # Manager only (~40Mi RSS). CI job pods are unbounded — no LimitRange
+      # in gitlab-ci and no cpu/memory in runners.kubernetes.
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    nodeSelector:
+      environment: runners
+    tolerations:
+      - key: "environment"
+        operator: "Equal"
+        value: "runners"
+        effect: "NoSchedule"
+    runners:
+      secret: werf-runner-secret
+      cache:
+        secretName: werf-runner-secret
+      config: |-
+        [[runners]]
+          request_concurrency = 4
+          environment = ["FF_USE_ADVANCED_POD_SPEC_CONFIGURATION=true"]
+
+          [runners.kubernetes]
+            namespace = "gitlab-ci"
+            service_account = "gitlab-ci-kubernetes-executor"
+            allowed_pull_policies = ["always", "if-not-present", "never"]
+            pull_policy = "if-not-present"
+            node_tolerations_overwrite_allowed = ".*"
+
+          [runners.kubernetes.dns_config]
+            [[runners.kubernetes.dns_config.options]]
+              name = "ndots"
+              value = "2"
+
+          [runners.cache]
+            Type = "s3"
+            Path = "runner"
+            Shared = true
+            [runners.cache.s3]
+              ServerAddress = "minio.msk.corp.example"
+              BucketName = "gitlab-cache"
+              BucketLocation = "ru-msk-1"
+              Insecure = false
+              AuthenticationType = "access-key"
+
+            [runners.kubernetes.node_selector]
+              "environment" = "runners"
+
+            [runners.kubernetes.node_tolerations]
+              "environment=runners" = "NoSchedule"
+
+            [runners.kubernetes.pod_annotations]
+              "container.apparmor.security.beta.kubernetes.io/build" = "unconfined"
+
+            [runners.kubernetes.pod_security_context]
+              run_as_non_root = true
+              run_as_user = 1000
+              run_as_group = 1000
+              fs_group = 1000
+
+            [[runners.kubernetes.volumes.pvc]]
+              name = "gitlab-ci-kubernetes-executor-werf-cache"
+              mount_path = "/home/build/.werf"
+
+            [[runners.kubernetes.volumes.pvc]]
+              name = "gitlab-ci-kubernetes-executor-builds-cache"
+              mount_path = "/builds"
+
+            [[runners.kubernetes.volumes.pvc]]
+              name = "gitlab-ci-kubernetes-executor-helper-home"
+              mount_path = "/home/helper"
+
+            [[runners.kubernetes.pod_spec]]
+              name = "fix helper HOME"
+              patch = '''
+                containers:
+                - name: helper
+                  env:
+                  - name: HOME
+                    value: /home/helper
+              '''
+              patch_type = "strategic"
+
+            [[runners.kubernetes.pod_spec]]
+              name = "buildah storage"
+              patch = '''
+                volumes:
+                - name: buildah-storage
+                  emptyDir: {}
+                containers:
+                - name: build
+                  volumeMounts:
+                  - name: buildah-storage
+                    mountPath: /home/build/.local/share/containers
+              '''
+              patch_type = "strategic"
+
+            [[runners.kubernetes.pod_spec]]
+              name = "fix volumes permissions"
+              patch = '''
+                initContainers:
+                - name: fix-volumes-permissions
+                  image: alpine
+                  command:
+                  - sh
+                  - -ec
+                  - |
+                    chown :$(id -g) /home/build/.werf /builds /home/helper /home/build/.local/share/containers
+                    chmod g+rwx /home/build/.werf /builds /home/helper /home/build/.local/share/containers
+                  securityContext:
+                    runAsUser: 0
+                    runAsNonRoot: false
+                  volumeMounts:
+                  - mountPath: /home/build/.werf
+                    name: gitlab-ci-kubernetes-executor-werf-cache
+                  - mountPath: /builds
+                    name: gitlab-ci-kubernetes-executor-builds-cache
+                  - mountPath: /home/helper
+                    name: gitlab-ci-kubernetes-executor-helper-home
+                  - mountPath: /home/build/.local/share/containers
+                    name: buildah-storage
+              '''
+              patch_type = "strategic"

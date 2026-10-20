@@ -1,0 +1,79 @@
+# Moves pods off an infra node before NodeMemoryHighUtilization (90% for 15m).
+# Cluster-autoscaler only scales on Pending pods, and the scheduler never
+# relocates a pod that is already running, so one 8Gi node sits on the
+# threshold while neighbours stay half empty.
+#
+# Actual memory via metrics-server, not requests: requests and MemAvailable
+# diverge. A node above 80% sheds one pod per cycle onto a node below 60%.
+# CPU is left at the plugin default (100%), so a busy CPU alone does not
+# evict. Kafka and vmstorage carry prefer-no-eviction; Mandatory makes that
+# stick. The overprovisioning pause pods do too, otherwise the single
+# eviction per cycle would be the pause (it uses no memory).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: descheduler
+  namespace: kube-system
+spec:
+  interval: 10m
+  timeout: 10m
+  chart:
+    spec:
+      chart: descheduler
+      version: "0.36.0"
+      reconcileStrategy: ChartVersion
+      sourceRef:
+        kind: HelmRepository
+        name: descheduler
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    kind: Deployment
+    deschedulingInterval: 5m
+    replicas: 1
+    priorityClassName: platform-critical
+    nodeSelector:
+      environment: infra
+    tolerations:
+      - key: environment
+        operator: Equal
+        value: infra
+        effect: PreferNoSchedule
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+    podAnnotations:
+      descheduler.alpha.kubernetes.io/prefer-no-eviction: "true"
+    deschedulerPolicyAPIVersion: descheduler/v1alpha2
+    deschedulerPolicy:
+      metricsProviders:
+        - source: KubernetesMetrics
+      profiles:
+        - name: default
+          pluginConfig:
+            - name: DefaultEvictor
+              args:
+                nodeFit: true
+                minReplicas: 1
+                minPodAge: 10m
+                noEvictionPolicy: Mandatory
+            - name: LowNodeUtilization
+              args:
+                thresholds:
+                  memory: 60
+                targetThresholds:
+                  memory: 80
+                metricsUtilization:
+                  source: KubernetesMetrics
+          plugins:
+            balance:
+              enabled:
+                - LowNodeUtilization

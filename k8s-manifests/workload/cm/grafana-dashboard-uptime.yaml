@@ -1,0 +1,319 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-uptime
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Uptime
+data:
+  uptime.json: |
+    {
+      "uid": "uptime-http",
+      "title": "Uptime",
+      "description": "HTTP 200 probes (blackbox, job=uptime-http). Новые URL из VMProbe появляются сами.",
+      "tags": ["platform", "uptime", "blackbox"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "editable": true,
+      "graphTooltip": 1,
+      "fiscalYearStartMonth": 0,
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "targetBlank": true,
+          "title": "Alertmanager",
+          "type": "link",
+          "url": "https://alertmanager.msk.corp.example"
+        },
+        {
+          "asDropdown": false,
+          "icon": "dashboard",
+          "keepTime": true,
+          "targetBlank": false,
+          "title": "Angie",
+          "type": "link",
+          "url": "/d/angie"
+        }
+      ],
+      "time": { "from": "now-24h", "to": "now" },
+      "timepicker": {
+        "refresh_intervals": ["1m", "5m", "10m", "30m"]
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": { "text": "VictoriaMetrics Prometheus", "value": "VictoriaMetricsProm" },
+            "hide": 0
+          },
+          {
+            "name": "instance",
+            "label": "URL",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(probe_success{job=\"uptime-http\"}, instance)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Overview",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Health",
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min(last_over_time(probe_success{job=\"uptime-http\",instance=~\"$instance\"}[15m]))", "legendFormat": "health" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Down now",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(last_over_time(probe_success{job=\"uptime-http\",instance=~\"$instance\"}[15m]) == 0) or vector(0)", "legendFormat": "down" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Availability",
+          "gridPos": { "h": 4, "w": 8, "x": 8, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "avg(avg_over_time(probe_success{job=\"uptime-http\",instance=~\"$instance\"}[$__range])) * 100", "legendFormat": "availability" }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 3,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 99 }, { "color": "green", "value": 99.9 }] }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "SSL expires (min)",
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min((last_over_time(probe_ssl_earliest_cert_expiry{job=\"uptime-http\",instance=~\"$instance\"}[15m]) - time()) / 86400)", "legendFormat": "ssl" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d",
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 14 }, { "color": "green", "value": 30 }] }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Firing ProbeFailed",
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(ALERTS{alertname=\"ProbeFailed\",alertstate=\"firing\"}) or vector(0)", "legendFormat": "firing" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "Targets",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 5 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "format": "table",
+            "instant": true,
+            "expr": "label_replace(last_over_time(probe_success{job=\"uptime-http\",instance=~\"$instance\"}[15m]), \"col\", \"Status\", \"__name__\", \".*\") or label_replace(last_over_time(probe_http_status_code{job=\"uptime-http\",instance=~\"$instance\"}[15m]), \"col\", \"HTTP\", \"__name__\", \".*\") or label_replace(last_over_time(probe_duration_seconds{job=\"uptime-http\",instance=~\"$instance\"}[15m]), \"col\", \"Latency\", \"__name__\", \".*\") or label_replace((last_over_time(probe_ssl_earliest_cert_expiry{job=\"uptime-http\",instance=~\"$instance\"}[15m]) - time()) / 86400, \"col\", \"TLS days\", \"__name__\", \".*\")"
+          }],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "sortBy": [{ "displayName": "Status", "desc": false }]
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "filterable": true, "align": "center" }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "URL" },
+                "properties": [
+                  { "id": "custom.align", "value": "left" },
+                  { "id": "custom.width", "value": 520 },
+                  { "id": "links", "value": [{ "title": "Open", "url": "${__value.text}", "targetBlank": true }] }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Status" },
+                "properties": [
+                  { "id": "custom.width", "value": 110 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }] }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "HTTP" },
+                "properties": [
+                  { "id": "decimals", "value": 0 },
+                  { "id": "custom.width", "value": 110 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 200 }, { "color": "orange", "value": 201 }] } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Latency" },
+                "properties": [
+                  { "id": "unit", "value": "s" },
+                  { "id": "decimals", "value": 3 },
+                  { "id": "custom.width", "value": 120 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "TLS days" },
+                "properties": [
+                  { "id": "unit", "value": "d" },
+                  { "id": "decimals", "value": 0 },
+                  { "id": "custom.width", "value": 120 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 14 }, { "color": "green", "value": 30 }] } }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "filterFieldsByName",
+              "options": { "include": { "pattern": "/^(instance|col|Value)$/" } }
+            },
+            {
+              "id": "groupingToMatrix",
+              "options": { "columnField": "col", "rowField": "instance", "valueField": "Value" }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true },
+                "indexByName": { "instance": 0, "Status": 1, "HTTP": 2, "Latency": 3, "TLS days": 4 },
+                "renameByName": { "instance": "URL" }
+              }
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "state-timeline",
+          "title": "Status history",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 13 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "probe_success{job=\"uptime-http\",instance=~\"$instance\"}", "legendFormat": "{{instance}}" }],
+          "options": {
+            "mergeValues": true,
+            "showValue": "never",
+            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "single" }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+              "custom": { "fillOpacity": 70, "lineWidth": 0, "spanNulls": true }
+            }
+          }
+        },
+        {
+          "id": 9,
+          "type": "row",
+          "title": "Latency & TLS",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 }
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Probe duration",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "probe_duration_seconds{job=\"uptime-http\",instance=~\"$instance\"}", "legendFormat": "{{instance}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 1, "spanNulls": true } } }
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "HTTP phases",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "probe_http_duration_seconds{job=\"uptime-http\",instance=~\"$instance\"}", "legendFormat": "{{instance}} {{phase}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 20, "lineWidth": 1, "spanNulls": true, "stacking": { "mode": "normal", "group": "A" } } } }
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "HTTP status",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "probe_http_status_code{job=\"uptime-http\",instance=~\"$instance\"}", "legendFormat": "{{instance}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 0, "lineWidth": 2, "spanNulls": true } } }
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "TLS certificate remaining",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "(probe_ssl_earliest_cert_expiry{job=\"uptime-http\",instance=~\"$instance\"} - time()) / 86400", "legendFormat": "{{instance}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "asc" } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d",
+              "decimals": 1,
+              "custom": { "fillOpacity": 10, "lineWidth": 1, "spanNulls": true },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 14 }, { "color": "green", "value": 30 }] }
+            }
+          }
+        }
+      ]
+    }

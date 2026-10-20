@@ -1,0 +1,106 @@
+# Each balancer serves /sd/vhosts.json (angie playbook). Blackbox connects
+# to that balancer and sends the vhost as Host and TLS SNI.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMScrapeConfig
+metadata:
+  name: angie-vhost
+  namespace: monitoring
+spec:
+  interval: 60s
+  scrapeTimeout: 15s
+  scheme: http
+  path: /probe
+  params:
+    module:
+      - http_vhost
+  httpSDConfigs:
+    - url: http://balancer-1.corp.example/sd/vhosts.json
+    - url: http://balancer-2.corp.example/sd/vhosts.json
+  relabelConfigs:
+    # health.corp.example answers 404 on /. Its real checks are static below.
+    - sourceLabels: [vhost]
+      regex: health\.corp\.example
+      action: drop
+    - sourceLabels: [__address__]
+      targetLabel: __param_target
+      replacement: https://$1/
+    # SD sets path when location / is "return 404" and the vhost has exact locations.
+    - sourceLabels: [__address__, path]
+      separator: ";"
+      regex: (.+);(/.*)
+      targetLabel: __param_target
+      replacement: https://$1$2
+    - sourceLabels: [vhost]
+      targetLabel: endpoint
+    - sourceLabels: [vhost, path]
+      separator: ";"
+      regex: (.+);(/.+)
+      targetLabel: endpoint
+      replacement: $1$2
+    - sourceLabels: [vhost]
+      targetLabel: __param_hostname
+    # api.* serves no page at /. 404 is success only for that name.
+    - sourceLabels: [vhost]
+      regex: api\..+
+      targetLabel: __param_module
+      replacement: http_vhost_api
+    - sourceLabels: [vhost]
+      targetLabel: instance
+    - targetLabel: job
+      replacement: angie-vhost
+    - targetLabel: __address__
+      replacement: blackbox-exporter.monitoring.svc:9115
+---
+# location / on this vhost is "return 404". The live checks are the exact
+# locations: /healthz is local, /readyz is the path to Kubernetes (502/504 fail).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMScrapeConfig
+metadata:
+  name: angie-vhost-health
+  namespace: monitoring
+spec:
+  interval: 60s
+  scrapeTimeout: 15s
+  scheme: http
+  path: /probe
+  params:
+    module:
+      - http_vhost
+  staticConfigs:
+    - targets: ["balancer-1.corp.example:443"]
+      labels:
+        vhost: health.corp.example
+        balancer: balancer-1
+        path: /healthz
+    - targets: ["balancer-1.corp.example:443"]
+      labels:
+        vhost: health.corp.example
+        balancer: balancer-1
+        path: /readyz
+    - targets: ["balancer-2.corp.example:443"]
+      labels:
+        vhost: health.corp.example
+        balancer: balancer-2
+        path: /healthz
+    - targets: ["balancer-2.corp.example:443"]
+      labels:
+        vhost: health.corp.example
+        balancer: balancer-2
+        path: /readyz
+  relabelConfigs:
+    - sourceLabels: [__address__, path]
+      separator: ";"
+      regex: (.+);(/.*)
+      targetLabel: __param_target
+      replacement: https://$1$2
+    - sourceLabels: [vhost, path]
+      separator: ""
+      targetLabel: endpoint
+    - sourceLabels: [vhost]
+      targetLabel: __param_hostname
+    - sourceLabels: [vhost]
+      targetLabel: instance
+    - targetLabel: job
+      replacement: angie-vhost
+    - targetLabel: __address__
+      replacement: blackbox-exporter.monitoring.svc:9115

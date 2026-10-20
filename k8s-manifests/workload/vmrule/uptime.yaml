@@ -1,0 +1,20 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: uptime
+  namespace: monitoring
+spec:
+  groups:
+    - name: uptime
+      rules:
+        # Probe interval is 1m; for: 1m fires after the first failed check.
+        - alert: ProbeFailed
+          expr: probe_success{job="uptime-http"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            team: uptime
+          annotations:
+            summary: "{{ $labels.instance }} не отвечает HTTP 200"
+            description: "{{ $labels.instance }} не отдаёт HTTP 200 (probe_success=0). Проверьте доступность сайта и TLS."
+            dashboard: "https://grafana.msk.corp.example/d/uptime-http?var-instance={{ $labels.instance | urlquery }}"

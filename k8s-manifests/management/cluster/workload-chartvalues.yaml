@@ -1,0 +1,334 @@
+# Cluster merge: chartValues + machineGlobalConfig.disable.
+# machinePools/сеть по-прежнему в Rancher. prune disabled, force не ставить.
+#
+# disable снимает bundled ingress с rke2-server: новый master больше не делает
+# helm-install nginx/traefik. Дальше ими владеют HelmRelease в workload.
+# Полный machineGlobalConfig — иначе SSA может затереть cni/kube-proxy.
+# Смена disable/ingress-controller/tls-san/ACE триггерит rolling control-plane.
+apiVersion: provisioning.cattle.io/v1
+kind: Cluster
+metadata:
+  name: workload
+  namespace: fleet-default
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: merge
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  # Agent ~1.2Gi WSS, пики ~1.5Gi. Без request scheduler сажает его
+  # рядом с sentry-web на 8Gi infra → NodeMemoryHighUtilization.
+  # environment=infra обязателен: Rancher всё равно добавляет
+  # toleration на control-plane, prefer недостаточно — при нехватке
+  # места на worker уедет на master. 1Gi request не влезает на ноды,
+  # где уже сидит sentry-web (остаток allocatable < 1Gi).
+  clusterAgentDeploymentCustomization:
+    appendTolerations:
+      - effect: PreferNoSchedule
+        key: environment
+        operator: Equal
+        value: infra
+    overrideResourceRequirements:
+      requests:
+        cpu: 100m
+        memory: 1Gi
+      limits:
+        memory: 2Gi
+    overrideAffinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/os
+                  operator: NotIn
+                  values:
+                    - windows
+                - key: environment
+                  operator: In
+                  values:
+                    - infra
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: cattle-cluster-agent
+  # Direct kubectl: https://k8s.msk.corp.example:6443 (Cilium L2 VIP),
+  # not Rancher proxy. caCerts = rke2-server-ca (L4 passthrough).
+  # kube-api-auth + tls-san = rolling control-plane, same as disable/.
+  localClusterAuthEndpoint:
+    enabled: true
+    fqdn: k8s.msk.corp.example
+    caCerts: |
+      -----BEGIN CERTIFICATE-----
+      REDACTED
+      -----END CERTIFICATE-----
+  rkeConfig:
+    machineGlobalConfig:
+      cni: cilium
+      disable-kube-proxy: true
+      etcd-expose-metrics: true
+      ingress-controller: none
+      tls-san:
+        - k8s.msk.corp.example
+        - 10.16.0.205
+      disable:
+        - rke2-ingress-nginx
+        - rke2-traefik
+        - rke2-traefik-crd
+    chartValues:
+      rke2-ingress-nginx:
+        controller:
+          kind: Deployment
+          hostNetwork: false
+          hostPort:
+            enabled: false
+          replicaCount: 2
+          minAvailable: 1
+          minReadySeconds: 10
+          updateStrategy:
+            type: RollingUpdate
+            rollingUpdate:
+              maxUnavailable: 0
+              maxSurge: 1
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: rke2-ingress-nginx
+                  app.kubernetes.io/component: controller
+          priorityClassName: platform-critical
+          nodeSelector:
+            environment: ingress
+          tolerations:
+            - key: environment
+              operator: Equal
+              value: ingress
+              effect: NoSchedule
+          autoscaling:
+            enabled: true
+            minReplicas: 2
+            maxReplicas: 4
+            targetCPUUtilizationPercentage: 80
+            targetMemoryUtilizationPercentage: ""
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          ingressClassResource:
+            name: nginx
+            enabled: true
+            default: false
+            controllerValue: "k8s.io/ingress-nginx"
+          extraArgs:
+            default-ssl-certificate: "kube-system/msk-corp-wildcard"
+          config:
+            allow-snippet-annotations: "true"
+            use-forwarded-headers: "true"
+            enable-metrics: "true"
+          metrics:
+            enabled: true
+            serviceMonitor:
+              enabled: false
+          service:
+            enabled: true
+            type: LoadBalancer
+            externalTrafficPolicy: Cluster
+            labels:
+              io.cilium/lb-managed: "true"
+            annotations:
+              lbipam.cilium.io/ips: "10.16.0.202"
+      rke2-traefik:
+        deployment:
+          kind: Deployment
+          replicas: null
+          minReadySeconds: 10
+        updateStrategy:
+          rollingUpdate:
+            maxUnavailable: 0
+            maxSurge: 1
+        podDisruptionBudget:
+          enabled: true
+          minAvailable: 1
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: rke2-traefik
+        nodeSelector:
+          environment: ingress
+        tolerations:
+          - key: environment
+            operator: Equal
+            value: ingress
+            effect: NoSchedule
+        autoscaling:
+          enabled: true
+          minReplicas: 2
+          maxReplicas: 4
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+        ports:
+          web:
+            port: 8000
+            expose:
+              default: true
+            exposedPort: 80
+            hostPort: null
+          websecure:
+            port: 8443
+            expose:
+              default: true
+            exposedPort: 443
+            hostPort: null
+            tls:
+              enabled: true
+        tlsStore:
+          default:
+            defaultCertificate:
+              secretName: msk-corp-wildcard
+        ingressClass:
+          enabled: true
+          isDefaultClass: false
+        service:
+          enabled: true
+          spec:
+            type: LoadBalancer
+          labels:
+            io.cilium/lb-managed: "true"
+          annotations:
+            lbipam.cilium.io/ips: "10.16.0.201"
+      rke2-cilium:
+        kubeProxyReplacement: true
+        k8sServiceHost: "localhost"
+        k8sServicePort: "6443"
+        routingMode: native
+        autoDirectNodeRoutes: true
+        ipv4NativeRoutingCIDR: "10.42.0.0/16"
+        devices: "eth+ ens+"
+        bpf:
+          masquerade: true
+          hostLegacyRouting: false
+          datapathMode: netkit
+          distributedLRU:
+            enabled: true
+          mapDynamicSizeRatio: 0.02
+          preallocateMaps: false
+          monitorAggregation: maximum
+          monitorInterval: "10s"
+          enableTCX: true
+          lbMapMax: 131072
+          events:
+            monitorInterval: "10s"
+        bpfClockProbe: true
+        enableIPv4BIGTCP: false
+        installNoConntrackIptablesRules: false
+        enableXTSocketFallback: false
+        bandwidthManager:
+          enabled: true
+          bbr: true
+        loadBalancer:
+          algorithm: maglev
+          mode: hybrid
+          dsrDispatch: opt
+          acceleration: best-effort
+        maglev:
+          tableSize: 65521
+          hashSeed: "REQHQO0cg96s/gam"
+        l2announcements:
+          enabled: true
+        prometheus:
+          enabled: true
+          metricsService: true
+          serviceMonitor:
+            enabled: false
+        envoy:
+          prometheus:
+            enabled: true
+            serviceMonitor:
+              enabled: false
+        dashboards:
+          enabled: true
+          namespace: monitoring
+          label: grafana_dashboard
+          labelValue: "1"
+          annotations:
+            grafana_folder: Cilium
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            memory: 2Gi
+        operator:
+          prometheus:
+            enabled: true
+            metricsService: true
+            serviceMonitor:
+              enabled: false
+          dashboards:
+            enabled: true
+            namespace: monitoring
+            label: grafana_dashboard
+            labelValue: "1"
+            annotations:
+              grafana_folder: Cilium
+        hubble:
+          enabled: true
+          eventQueueSize: 32768
+          metrics:
+            enableOpenMetrics: true
+            enabled:
+              - "dns:query;sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload"
+              - "drop:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+              - "tcp:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+              - "flow:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+              - "icmp:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+              - "httpV2:exemplars=true;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+            serviceMonitor:
+              enabled: false
+            dashboards:
+              enabled: true
+              namespace: monitoring
+              label: grafana_dashboard
+              labelValue: "1"
+              annotations:
+                grafana_folder: Hubble
+          relay:
+            enabled: true
+          ui:
+            enabled: true
+            ingress:
+              enabled: false
+            service:
+              type: LoadBalancer
+              labels:
+                io.cilium/lb-managed: "true"
+                external-dns.corp.example/enabled: "true"
+              annotations:
+                lbipam.cilium.io/ips: "10.16.0.204"
+                external-dns.alpha.kubernetes.io/hostname: hubble.msk.corp.example
+        ingressController:
+          enabled: true
+          default: true
+          loadbalancerMode: shared
+          defaultSecretNamespace: kube-system
+          defaultSecretName: msk-corp-wildcard
+          service:
+            type: LoadBalancer
+            labels:
+              io.cilium/lb-managed: "true"
+            annotations:
+              lbipam.cilium.io/ips: "10.16.0.203"

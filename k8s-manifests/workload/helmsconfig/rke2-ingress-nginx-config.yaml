@@ -1,0 +1,79 @@
+# Overlay для bundled HelmChart, пока RKE2 его ещё ставит.
+# Источник правды после disable — helmrelease/rke2-ingress-nginx.yaml
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-ingress-nginx
+  namespace: kube-system
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  valuesContent: |-
+    controller:
+      kind: Deployment
+      hostNetwork: false
+      hostPort:
+        enabled: false
+      replicaCount: 2
+      minAvailable: 1
+      minReadySeconds: 10
+      updateStrategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 0
+          maxSurge: 1
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: rke2-ingress-nginx
+              app.kubernetes.io/component: controller
+      priorityClassName: platform-critical
+      nodeSelector:
+        environment: ingress
+      tolerations:
+        - key: environment
+          operator: Equal
+          value: ingress
+          effect: NoSchedule
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 4
+        targetCPUUtilizationPercentage: 80
+        targetMemoryUtilizationPercentage: ""
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+      ingressClassResource:
+        name: nginx
+        enabled: true
+        default: false
+        controllerValue: "k8s.io/ingress-nginx"
+      extraArgs:
+        default-ssl-certificate: "kube-system/msk-corp-wildcard"
+      publishService:
+        enabled: true
+      config:
+        allow-snippet-annotations: "true"
+        use-forwarded-headers: "true"
+        annotations-risk-level: Critical
+        enable-metrics: "true"
+      metrics:
+        enabled: true
+        serviceMonitor:
+          enabled: false
+      service:
+        enabled: true
+        type: LoadBalancer
+        externalTrafficPolicy: Cluster
+        labels:
+          io.cilium/lb-managed: "true"
+        annotations:
+          lbipam.cilium.io/ips: "10.16.0.202"

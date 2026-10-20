@@ -1,0 +1,407 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-sentry
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Sentry
+data:
+  sentry.json: |
+    {
+      "uid": "sentry",
+      "title": "Sentry",
+      "description": "Ошибки приложений и ingest из self-hosted Sentry. Расследование — в самом Sentry.",
+      "tags": ["platform", "sentry", "errors"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "targetBlank": true,
+          "title": "Sentry",
+          "type": "link",
+          "url": "https://sentry.msk.corp.example"
+        }
+      ],
+      "time": { "from": "now-24h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "sentry",
+            "label": "Sentry",
+            "type": "datasource",
+            "query": "grafana-sentry-datasource",
+            "current": { "text": "Sentry", "value": "sentry" },
+            "hide": 0
+          },
+          {
+            "name": "project",
+            "type": "query",
+            "datasource": { "type": "grafana-sentry-datasource", "uid": "${sentry}" },
+            "query": { "type": "projects" },
+            "refresh": 1,
+            "includeAll": false,
+            "multi": false,
+            "default": "2",
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "environment",
+            "type": "query",
+            "datasource": { "type": "grafana-sentry-datasource", "uid": "${sentry}" },
+            "query": { "type": "environments", "projectIds": ["${project}"] },
+            "refresh": 1,
+            "includeAll": true,
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Now",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Errors",
+          "description": "event.type:error за выбранный интервал",
+          "gridPos": { "h": 4, "w": 8, "x": 0, "y": 1 },
+          "datasource": { "type": "grafana-sentry-datasource", "uid": "${sentry}" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "eventsStats",
+              "projectIds": ["${project}"],
+              "environments": ["${environment}"],
+              "eventsStatsYAxis": ["count()"],
+              "eventsStatsQuery": "event.type:error",
+              "eventsStatsGroups": [],
+              "eventsStatsLimit": 10
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "reduceOptions": { "calcs": ["sum"], "values": false }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 100 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Unresolved",
+          "description": "Открытые issues. Count — число строк, не lifetime totals.",
+          "gridPos": { "h": 4, "w": 8, "x": 8, "y": 1 },
+          "datasource": { "type": "grafana-sentry-datasource", "uid": "${sentry}" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "issues",
+              "projectIds": ["${project}"],
+              "environments": ["${environment}"],
+              "issuesQuery": "is:unresolved",
+              "issuesSort": "freq",
+              "issuesLimit": 10000
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "reduceOptions": { "calcs": ["count"], "fields": "/^Title$/", "values": false }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 20 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "New 24h",
+          "description": "Unresolved, first seen за последние 24 часа",
+          "gridPos": { "h": 4, "w": 8, "x": 16, "y": 1 },
+          "datasource": { "type": "grafana-sentry-datasource", "uid": "${sentry}" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "issues",
+              "projectIds": ["${project}"],
+              "environments": ["${environment}"],
+              "issuesQuery": "is:unresolved first-seen:-24h",
+              "issuesSort": "new",
+              "issuesLimit": 10000
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "reduceOptions": { "calcs": ["count"], "fields": "/^Title$/", "values": false }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 10 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Errors",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+          "datasource": { "type": "grafana-sentry-datasource", "uid": "${sentry}" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "eventsStats",
+              "projectIds": ["${project}"],
+              "environments": ["${environment}"],
+              "eventsStatsYAxis": ["count()"],
+              "eventsStatsQuery": "event.type:error",
+              "eventsStatsGroups": [],
+              "eventsStatsLimit": 10
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "fillOpacity": 15,
+                "pointSize": 5,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "short"
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          }
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Errors by project",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+          "datasource": { "type": "grafana-sentry-datasource", "uid": "${sentry}" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "eventsStats",
+              "projectIds": ["${project}"],
+              "environments": ["${environment}"],
+              "eventsStatsYAxis": ["count()"],
+              "eventsStatsQuery": "event.type:error",
+              "eventsStatsGroups": ["project"],
+              "eventsStatsLimit": 10
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "fillOpacity": 10,
+                "pointSize": 5,
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "mode": "normal", "group": "A" }
+              },
+              "unit": "short"
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          }
+        },
+        {
+          "id": 7,
+          "type": "row",
+          "title": "Ingest",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 }
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Error outcomes",
+          "description": "accepted / filtered / rate_limited / invalid — квота и дропы на ingest",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+          "datasource": { "type": "grafana-sentry-datasource", "uid": "${sentry}" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "statsV2",
+              "projectIds": ["${project}"],
+              "statsFields": ["sum(quantity)"],
+              "statsGroupBy": ["outcome"],
+              "statsCategory": ["error"],
+              "statsOutcome": [],
+              "statsReason": [],
+              "statsInterval": "$__interval"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "fillOpacity": 10,
+                "pointSize": 5,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "short"
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          }
+        },
+        {
+          "id": 9,
+          "type": "row",
+          "title": "Issues",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }
+        },
+        {
+          "id": 10,
+          "type": "table",
+          "title": "Unresolved",
+          "description": "Title ведёт в Sentry. Count / UserCount — за интервал дашборда.",
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 23 },
+          "datasource": { "type": "grafana-sentry-datasource", "uid": "${sentry}" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "issues",
+              "projectIds": ["${project}"],
+              "environments": ["${environment}"],
+              "issuesQuery": "is:unresolved",
+              "issuesSort": "freq",
+              "issuesLimit": 50
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": { "show": false, "countRows": false, "reducer": ["sum"] }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "filterable": true, "inspect": false }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Title" },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Open in Sentry",
+                        "url": "${__data.fields.Permalink}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": { "id": "byRegexp", "options": "^(ID|HasSeen|IsPublic|IsBookmarked|IsSubscribed|IsUnhandled|Permalink|Type|Platform|Substatus|NumComments)$" },
+                "properties": [{ "id": "custom.hidden", "value": true }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Level" },
+                "properties": [
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "fatal": { "color": "red" },
+                          "error": { "color": "red" },
+                          "warning": { "color": "orange" },
+                          "info": { "color": "blue" }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Status" },
+                "properties": [
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "unresolved": { "color": "orange" },
+                          "resolved": { "color": "green" },
+                          "ignored": { "color": "blue" }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }

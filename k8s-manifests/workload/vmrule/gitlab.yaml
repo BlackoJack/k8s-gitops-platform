@@ -1,0 +1,421 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: gitlab
+  namespace: monitoring
+spec:
+  groups:
+    - name: gitlab-runner
+      rules:
+        # script_failure is the job itself (tests, lint). Infra is system/api/scheduler.
+        - alert: GitLabRunnerSystemFailure
+          expr: increase(gitlab_runner_failed_jobs_total{failure_reason=~"runner_system_failure|api_failure|scheduler_failure"}[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CI {{ $labels.failure_reason }} на {{ $labels.runner_name }}"
+            description: "Runner {{ $labels.runner_name }} на {{ $labels.cluster }}: {{ $labels.failure_reason }}. Это не падение тестов — смотрите GitLab API, executor, registry, ресурсы нод runners."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab?var-runner={{ $labels.runner_name | urlquery }}"
+
+        - alert: GitLabCIHighFailureRate
+          expr: |
+            sum by (cluster, runner_name) (increase(gitlab_runner_failed_jobs_total[1h])) > 10
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Много CI failures на {{ $labels.runner_name }}"
+            description: "{{ $value | humanize }} упавших job'ов за час на {{ $labels.cluster }} / {{ $labels.runner_name }}. Если это не массовый красный pipeline — проверьте runner, cache, registry."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab?var-runner={{ $labels.runner_name | urlquery }}"
+
+        - alert: GitLabRunnerSaturated
+          expr: |
+            (
+              sum by (cluster, runner_release) (gitlab_runner_jobs{state!="idle"})
+              / clamp_min(sum by (cluster, runner_release) (gitlab_runner_concurrent), 1)
+            ) > 0.9
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Runner {{ $labels.runner_release }} забит ({{ $value | humanizePercentage }})"
+            description: "Занято >90% concurrent на {{ $labels.cluster }}. Новые job'ы ждут очередь. Поднимите concurrent или добавьте runner."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab?var-runner={{ $labels.runner_release | urlquery }}"
+
+        - alert: GitLabRunnerQueueSlow
+          expr: |
+            histogram_quantile(
+              0.9,
+              sum by (le, cluster, runner_name) (rate(gitlab_runner_job_queue_duration_seconds_bucket[15m]))
+            ) > 300
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CI очередь {{ $labels.runner_name }}: p90 {{ $value | humanizeDuration }}"
+            description: "Job ждёт runner больше 5 минут (p90) на {{ $labels.cluster }}. Не хватает capacity или runner не забирает jobs."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab?var-runner={{ $labels.runner_name | urlquery }}"
+
+        - alert: GitLabRunnerRequestConcurrencyExceeded
+          expr: increase(gitlab_runner_request_concurrency_exceeded_total[15m]) > 10
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "request_concurrency превышен на {{ $labels.runner_name }}"
+            description: "Runner {{ $labels.runner_name }} на {{ $labels.cluster }} слишком часто упирается в request_concurrency. Job'ы забираются медленнее."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab?var-runner={{ $labels.runner_name | urlquery }}"
+
+        - alert: GitLabRunnerApiErrors
+          expr: |
+            sum by (cluster, runner_name, endpoint, status) (
+              increase(gitlab_runner_api_request_statuses_total{status=~"5..|401|403"}[15m])
+            ) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GitLab API {{ $labels.status }} ({{ $labels.endpoint }}) у {{ $labels.runner_name }}"
+            description: "Runner {{ $labels.runner_name }} на {{ $labels.cluster }} получает {{ $labels.status }} на {{ $labels.endpoint }}. 401/403 — токен, 5xx — gitlab.corp.example."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab?var-runner={{ $labels.runner_name | urlquery }}"
+
+        - alert: GitLabRunnerScrapeFailed
+          expr: up{job="gitlab-runner"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape runner {{ $labels.pod }}"
+            description: "up=0 для job=gitlab-runner на {{ $labels.cluster }}. Менеджер не отдаёт :9252/metrics."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabCIJobPodPending
+          expr: kube_pod_status_phase{namespace="gitlab-ci", phase="Pending"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CI pod {{ $labels.pod }} Pending 15м"
+            description: "{{ $labels.pod }} в gitlab-ci не планируется на {{ $labels.cluster }}. Обычно нет capacity на нодах environment=runners или не хватает PVC/quota."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+    - name: gitlab-agent
+      rules:
+        - alert: GitLabAgentDown
+          expr: |
+            kube_deployment_spec_replicas{namespace="gitlab-agent"} > 0
+            and kube_deployment_status_replicas_available{namespace="gitlab-agent"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "GitLab agent недоступен на {{ $labels.cluster }}"
+            description: "Deployment {{ $labels.deployment }} в gitlab-agent без Ready replica. GitLab не ходит в этот кластер (CI via agent, Flux git, k8s dashboard)."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab?var-cluster={{ $labels.cluster | urlquery }}"
+
+        - alert: GitLabAgentNotReady
+          expr: |
+            kube_pod_status_ready{namespace="gitlab-agent", condition="true"} == 0
+            and on (cluster, namespace, pod)
+            kube_pod_status_phase{phase="Running"} == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GitLab agent {{ $labels.pod }} не Ready"
+            description: "agentk Running, но не Ready на {{ $labels.cluster }}. Обычно нет туннеля до KAS wss://gitlab.corp.example/-/kubernetes-agent/."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab?var-cluster={{ $labels.cluster | urlquery }}"
+
+        - alert: GitLabAgentScrapeFailed
+          expr: up{job="gitlab-agent"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape agentk {{ $labels.pod }}"
+            description: "up=0 для job=gitlab-agent на {{ $labels.cluster }}. Observability :8080/metrics не отвечает."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+    - name: gitlab-instance
+      rules:
+        - alert: GitLabMetricsScrapeFailed
+          expr: up{job="gitlab"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape gitlab.corp.example/-/metrics"
+            description: "up=0 для job=gitlab. Проверьте IP allowlist, TLS и Admin → Settings → Metrics and profiling → Enable GitLab Prometheus metrics endpoint."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabExporterScrapeFailed
+          expr: up{job="gitlab-exporter"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape gitlab-exporter :9168"
+            description: "up=0 для job=gitlab-exporter. Sidekiq queue и ci_stale_builds не обновляются."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabRedisDown
+          expr: redis_up{job="gitlab-redis"} == 0 or up{job="gitlab-redis"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis GitLab недоступен"
+            description: "redis_exporter :9121 или сам Redis на gitlab.corp.example не отвечает. UI, CI, Sidekiq лягут следом."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabPostgresDown
+          expr: pg_up{job="gitlab-postgres"} == 0 or up{job="gitlab-postgres"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres GitLab недоступен"
+            description: "postgres_exporter :9187 или PostgreSQL на gitlab.corp.example не отвечает."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabNodeScrapeFailed
+          expr: up{job="gitlab-node"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape node_exporter GitLab :9100"
+            description: "up=0 для job=gitlab-node. Нет CPU/disk/memory хоста gitlab.corp.example."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabSidekiqScrapeFailed
+          expr: up{job="gitlab-sidekiq"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape Sidekiq :8082"
+            description: "up=0 для job=gitlab-sidekiq. Нужны sidekiq['listen_address'] = '0.0.0.0' и firewall до vmagent."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabWorkhorseScrapeFailed
+          expr: up{job="gitlab-workhorse"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape Workhorse :9229"
+            description: "up=0 для job=gitlab-workhorse. Проверьте gitlab_workhorse['prometheus_listen_addr'] и firewall."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabGitalyScrapeFailed
+          expr: up{job="gitlab-gitaly"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape Gitaly :9236"
+            description: "up=0 для job=gitlab-gitaly. Нужен gitaly['configuration'][:prometheus_listen_addr] = '0.0.0.0:9236' (старый gitaly['prometheus_listen_addr'] игнорируется)."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabRegistryScrapeFailed
+          expr: up{job="gitlab-registry"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape Registry :5001"
+            description: "up=0 для job=gitlab-registry. registry['debug_addr'] = '0.0.0.0:5001' и firewall."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabKasScrapeFailed
+          expr: up{job="gitlab-kas"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape KAS :8151"
+            description: "up=0 для job=gitlab-kas. gitlab_kas['observability_listen_address'] = '0.0.0.0:8151' и firewall."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabNginxScrapeFailed
+          expr: up{job="gitlab-nginx"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет scrape nginx VTS :9999"
+            description: "up=0 для job=gitlab-nginx. Нужен /metrics с # HELP nginx_vts_*, без stub_status в options."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabNginxHttp5xx
+          expr: |
+            (
+              sum(rate(nginx_vts_server_requests_total{job="gitlab-nginx", host="gitlab.corp.example", code="5xx"}[5m]))
+              / clamp_min(sum(rate(nginx_vts_server_requests_total{job="gitlab-nginx", host="gitlab.corp.example"}[5m])), 0.1)
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "nginx gitlab.corp.example 5xx {{ $value | humanizePercentage }}"
+            description: "Доля nginx 5xx выше 5%. Смотрите Workhorse, Puma, Gitaly."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabCIQueueHigh
+          expr: max(gitlab_ci_current_queue_size{job="gitlab"}) > 15
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CI очередь GitLab: {{ $value | humanize }} job'ов"
+            description: "gitlab_ci_current_queue_size >15 пятнадцать минут. Runners не успевают забирать jobs. Метрика есть только после Feature.enable(:gitlab_ci_builds_queuing_metrics) и первого poll runner."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabKasNoAgents
+          expr: connected_agents_count{job="gitlab-kas"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KAS без подключённых agentk"
+            description: "connected_agents_count=0 на gitlab.corp.example:8151. Агенты в gitlab-agent не держат туннель до KAS."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabGitalyGrpcErrors
+          expr: |
+            sum(rate(grpc_server_handled_total{job="gitlab-gitaly", grpc_code!~"OK|Canceled|NotFound"}[5m])) > 0.2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Gitaly gRPC errors {{ $value | humanize }}/s"
+            description: "Не-OK ответы Gitaly на gitlab.corp.example:9236. Смотрите диск git-data и load хоста."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        # job_register_attempts_failed_total is a GitLab misnomer: RegisterJobService
+        # increments it whenever a poll does not assign a job (other runner took it,
+        # tags mismatch). That is normal with kube-runner + werf-runner. Alert on
+        # conflict / lag / pre-assign drop instead. Tokens: GitLabRunnerAuthenticationFailures.
+        - alert: GitLabJobRegisterFailures
+          expr: |
+            sum(increase(gitlab_ci_queue_operations_total{job="gitlab", operation=~"queue_conflict|build_conflict_lock|build_conflict_exception|build_conflict_transition|queue_replication_lag|queue_depth_limit|runner_pre_assign_checks_failed"}[15m])) > 20
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CI queue: конфликты назначения jobs"
+            description: "{{ $value | humanize }} queue conflict/lag/pre-assign fail за 15м на gitlab.corp.example. Runners гоняются за одним job, отстаёт replica, или drop до assign. Не путать с пустым poll. Токены — GitLabRunnerAuthenticationFailures."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabRunnerAuthenticationFailures
+          expr: increase(gitlab_ci_runner_authentication_failure_total{job="gitlab"}[15m]) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GitLab отклоняет authentication runners"
+            description: "{{ $value | humanize }} неуспешных runner auth за 15м. Проверьте registration token и gitlab.corp.example."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabHttpErrorRateHigh
+          expr: |
+            (
+              sum(rate(http_requests_total{job="gitlab", status=~"5.."}[5m]))
+              / clamp_min(sum(rate(http_requests_total{job="gitlab"}[5m])), 0.1)
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "gitlab.corp.example HTTP 5xx {{ $value | humanizePercentage }}"
+            description: "Доля Rack 5xx выше 5% на gitlab.corp.example. Смотрите Puma, Postgres, Redis, Gitaly."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabPumaQueueHigh
+          expr: sum(puma_queued_connections{job="gitlab"}) > 10
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Puma queue {{ $value | humanize }}"
+            description: "У Puma больше 10 соединений в очереди 10+ минут. Rails не успевает, UI будет тормозить."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabSidekiqQueueHigh
+          expr: sidekiq_jobs_enqueued_size{job="gitlab-exporter"} > 50
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sidekiq очередь GitLab: {{ $value | humanize }}"
+            description: "В Sidekiq больше 50 job'ов 10+ минут. Фоновые задачи GitLab не разбираются."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabRedisMemoryHigh
+          expr: |
+            (
+              redis_memory_used_bytes{job="gitlab-redis"}
+              / clamp_min(redis_memory_max_bytes{job="gitlab-redis"}, 1)
+            ) > 0.9
+            and redis_memory_max_bytes{job="gitlab-redis"} > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis GitLab память {{ $value | humanizePercentage }}"
+            description: "Больше 90% maxmemory на gitlab.corp.example. Дальше eviction."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabPostgresConnectionsHigh
+          expr: |
+            sum(pg_stat_database_numbackends{job="gitlab-postgres", datname="gitlabhq_production"})
+            / clamp_min(max(pg_settings_max_connections{job="gitlab-postgres"}), 1)
+            > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres GitLab connections {{ $value | humanizePercentage }}"
+            description: "Больше 85% max_connections на gitlabhq_production. Puma/Sidekiq могут начать отваливаться."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabHostDiskLow
+          expr: |
+            (
+              node_filesystem_avail_bytes{job="gitlab-node", mountpoint="/var/opt/gitlab"}
+              / clamp_min(node_filesystem_size_bytes{job="gitlab-node", mountpoint="/var/opt/gitlab"}, 1)
+            ) < 0.1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Диск /var/opt/gitlab <10%"
+            description: "На gitlab.corp.example мало места под GitLab data. Репозитории, registry, postgres упрутся в диск."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabWorkhorseHttpErrorRateHigh
+          expr: |
+            (
+              sum(rate(gitlab_workhorse_http_requests_total{job="gitlab-workhorse", code=~"5.."}[5m]))
+              / clamp_min(sum(rate(gitlab_workhorse_http_requests_total{job="gitlab-workhorse"}[5m])), 0.1)
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Workhorse HTTP 5xx {{ $value | humanizePercentage }}"
+            description: "Доля 5xx на gitlab-workhorse выше 5%. Смотрите Rails, Gitaly, Registry."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"
+
+        - alert: GitLabSidekiqJobsFailing
+          expr: |
+            sum(increase(sidekiq_jobs_completion_seconds_count{job="gitlab-sidekiq", job_status="fail"}[15m])) > 20
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sidekiq failures: {{ $value | humanize }} / 15м"
+            description: "Много упавших Sidekiq job'ов на gitlab.corp.example. Смотрите очереди и dead set."
+            dashboard: "https://grafana.msk.corp.example/d/gitlab"

@@ -1,0 +1,97 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: domains
+  namespace: monitoring
+spec:
+  groups:
+    - name: domains
+      rules:
+        # team=domains → Zulip topic «Домены». Агрегация by (domain).
+        # $value = дни: сравнение expiry должно быть слева от and.
+        - alert: DomainExpired
+          expr: |
+            min by (domain) (domain_expiry_days{job="domain-exporter"}) < 0
+            and
+            min by (domain) (domain_probe_success{job="domain-exporter"}) == 1
+          for: 5m
+          labels:
+            severity: critical
+            team: domains
+            mention: "true"
+          annotations:
+            summary: "Домен {{ $labels.domain }} уже не оплачен ({{ $value }} дн.)"
+            description: "{{ $labels.domain }}: paid-till/expiry в прошлом ({{ $value }} дн.). Продлите у регистратора, пока не наступил free-date / redemption."
+            dashboard: "https://grafana.msk.corp.example/d/domains?var-domain={{ $labels.domain | urlquery }}"
+
+        # < 7 дней — label mention, Zulip тегает владельцев. 7–14 дней — тот же alert без тега.
+        - alert: DomainExpiringCritical
+          expr: |
+            min by (domain) (domain_expiry_days{job="domain-exporter"}) < 7
+            and
+            min by (domain) (domain_expiry_days{job="domain-exporter"}) >= 0
+            and
+            min by (domain) (domain_probe_success{job="domain-exporter"}) == 1
+          for: 5m
+          labels:
+            severity: critical
+            team: domains
+            mention: "true"
+          annotations:
+            summary: "Домен {{ $labels.domain }} истекает через {{ $value }} дн."
+            description: "{{ $labels.domain }}: до конца оплаты меньше 7 дней. Продлите регистрацию."
+            dashboard: "https://grafana.msk.corp.example/d/domains?var-domain={{ $labels.domain | urlquery }}"
+
+        - alert: DomainExpiringCritical
+          expr: |
+            min by (domain) (domain_expiry_days{job="domain-exporter"}) <= 14
+            and
+            min by (domain) (domain_expiry_days{job="domain-exporter"}) >= 7
+            and
+            min by (domain) (domain_probe_success{job="domain-exporter"}) == 1
+          for: 5m
+          labels:
+            severity: critical
+            team: domains
+          annotations:
+            summary: "Домен {{ $labels.domain }} истекает через {{ $value }} дн."
+            description: "{{ $labels.domain }}: до конца оплаты не больше 14 дней. Продлите регистрацию."
+            dashboard: "https://grafana.msk.corp.example/d/domains?var-domain={{ $labels.domain | urlquery }}"
+
+        - alert: DomainExpiringSoon
+          expr: |
+            min by (domain) (domain_expiry_days{job="domain-exporter"}) < 60
+            and
+            min by (domain) (domain_expiry_days{job="domain-exporter"}) > 14
+            and
+            min by (domain) (domain_probe_success{job="domain-exporter"}) == 1
+          for: 30m
+          labels:
+            severity: warning
+            team: domains
+          annotations:
+            summary: "Домен {{ $labels.domain }} истекает через {{ $value }} дн."
+            description: "{{ $labels.domain }}: до конца оплаты меньше 60 дней. Запланируйте продление."
+            dashboard: "https://grafana.msk.corp.example/d/domains?var-domain={{ $labels.domain | urlquery }}"
+
+        - alert: DomainProbeFailed
+          expr: min by (domain) (domain_probe_success{job="domain-exporter"}) == 0
+          for: 2h
+          labels:
+            severity: warning
+            team: domains
+          annotations:
+            summary: "Не удалось узнать срок домена {{ $labels.domain }}"
+            description: "RDAP/WHOIS для {{ $labels.domain }} не отдал expiry уже 2+ часа. Проверьте exporter и доступ к whois/rdap."
+            dashboard: "https://grafana.msk.corp.example/d/domains?var-domain={{ $labels.domain | urlquery }}"
+
+        - alert: DomainTechnitiumListFailed
+          expr: max(domain_technitium_up{job="domain-exporter"}) == 0
+          for: 30m
+          labels:
+            severity: warning
+            team: domains
+          annotations:
+            summary: "Не удалось взять список доменов из Technitium"
+            description: "/api/zones/list с dns-1/2 не отвечает. Exporter держит предыдущий список (плюс extras из ConfigMap)."
+            dashboard: "https://grafana.msk.corp.example/d/domains"

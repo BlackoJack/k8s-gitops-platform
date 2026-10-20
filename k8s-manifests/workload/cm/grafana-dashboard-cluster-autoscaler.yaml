@@ -1,0 +1,353 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-cluster-autoscaler
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Cluster Autoscaler
+data:
+  cluster-autoscaler.json: |
+    {
+      "uid": "cluster-autoscaler",
+      "title": "Cluster Autoscaler",
+      "description": "Scale-up/down через Rancher: пулы, Unschedulable, unregistered (медленный clone), ошибки CA.",
+      "tags": ["platform", "cluster-autoscaler", "autoscaling"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "editable": true,
+      "graphTooltip": 1,
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": { "text": "VictoriaMetrics Prometheus", "value": "VictoriaMetricsProm" },
+            "hide": 0
+          },
+          {
+            "name": "cluster",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(cluster_autoscaler_cluster_safe_to_autoscale, cluster)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "node_group",
+            "label": "Node group",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(cluster_autoscaler_node_group_target_count{cluster=~\"$cluster\"}, node_group)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Now",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "CA",
+          "gridPos": { "h": 4, "w": 3, "x": 0, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min(up{job=\"cluster-autoscaler\",cluster=~\"$cluster\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Safe to autoscale",
+          "description": "0 — CA встал: слишком много Unready (ok-total-unready-count / max-total-unready-percentage).",
+          "gridPos": { "h": 4, "w": 3, "x": 3, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min(cluster_autoscaler_cluster_safe_to_autoscale{cluster=~\"$cluster\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{ "type": "value", "options": { "0": { "text": "HALT", "color": "red" }, "1": { "text": "OK", "color": "green" } } }],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Ready",
+          "gridPos": { "h": 4, "w": 3, "x": 6, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(cluster_autoscaler_nodes_count{cluster=~\"$cluster\",state=\"ready\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }, { "color": "green", "value": 1 }] } } }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Unready / notStarted",
+          "description": "notStarted — ещё клонируется / не зарегистрировалась. Unready — в API, но не Ready.",
+          "gridPos": { "h": 4, "w": 3, "x": 9, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(cluster_autoscaler_nodes_count{cluster=~\"$cluster\",state=~\"unready|notStarted\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 8 }] } } }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Unschedulable pods",
+          "gridPos": { "h": 4, "w": 3, "x": 12, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(cluster_autoscaler_unschedulable_pods_count{cluster=~\"$cluster\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 10 }] } } }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Scale-down cooldown",
+          "gridPos": { "h": 4, "w": 3, "x": 15, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "max(cluster_autoscaler_scale_down_in_cooldown{cluster=~\"$cluster\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{ "type": "value", "options": { "0": { "text": "off", "color": "green" }, "1": { "text": "on", "color": "blue" } } }],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "blue", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Unneeded",
+          "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(cluster_autoscaler_unneeded_nodes_count{cluster=~\"$cluster\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "blue", "value": 1 }] } } }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Errors / 1h",
+          "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(increase(cluster_autoscaler_errors_total{cluster=~\"$cluster\"}[1h])) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 10 }] } } }
+        },
+        {
+          "id": 10,
+          "type": "row",
+          "title": "Node groups",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "Pools",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "format": "table",
+            "instant": true,
+            "expr": "label_replace(cluster_autoscaler_node_group_min_count{cluster=~\"$cluster\",node_group=~\"$node_group\"}, \"col\", \"Min\", \"__name__\", \".*\") or label_replace(cluster_autoscaler_node_group_max_count{cluster=~\"$cluster\",node_group=~\"$node_group\"}, \"col\", \"Max\", \"__name__\", \".*\") or label_replace(cluster_autoscaler_node_group_target_count{cluster=~\"$cluster\",node_group=~\"$node_group\"}, \"col\", \"Target\", \"__name__\", \".*\") or label_replace(max by (cluster, node_group) (cluster_autoscaler_node_group_healthiness{cluster=~\"$cluster\",node_group=~\"$node_group\"}), \"col\", \"Healthy\", \"__name__\", \".*\") or label_replace(max by (cluster, node_group) (cluster_autoscaler_node_group_backoff_status{cluster=~\"$cluster\",node_group=~\"$node_group\"}), \"col\", \"Backoff\", \"__name__\", \".*\")"
+          }],
+          "options": { "showHeader": true, "cellHeight": "sm", "sortBy": [{ "displayName": "Node group", "desc": false }] },
+          "fieldConfig": {
+            "defaults": { "decimals": 0, "custom": { "filterable": true, "align": "center" } },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Node group" },
+                "properties": [{ "id": "custom.align", "value": "left" }, { "id": "custom.width", "value": 360 }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Healthy" },
+                "properties": [
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "no", "color": "red" }, "1": { "text": "yes", "color": "green" } } }] }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Backoff" },
+                "properties": [
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "off", "color": "green" }, "1": { "text": "on", "color": "orange" } } }] }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            { "id": "filterFieldsByName", "options": { "include": { "pattern": "/^(node_group|col|Value)$/" } } },
+            { "id": "groupingToMatrix", "options": { "columnField": "col", "rowField": "node_group", "valueField": "Value" } },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true },
+                "indexByName": { "node_group": 0, "Min": 1, "Target": 2, "Max": 3, "Healthy": 4, "Backoff": 5 },
+                "renameByName": { "node_group": "Node group" }
+              }
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Target vs min/max",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "cluster_autoscaler_node_group_target_count{cluster=~\"$cluster\",node_group=~\"$node_group\"}", "legendFormat": "target {{node_group}}" },
+            { "refId": "B", "expr": "cluster_autoscaler_node_group_min_count{cluster=~\"$cluster\",node_group=~\"$node_group\"}", "legendFormat": "min {{node_group}}" },
+            { "refId": "C", "expr": "cluster_autoscaler_node_group_max_count{cluster=~\"$cluster\",node_group=~\"$node_group\"}", "legendFormat": "max {{node_group}}" }
+          ],
+          "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 0, "lineWidth": 2, "spanNulls": true } } }
+        },
+        {
+          "id": 13,
+          "type": "row",
+          "title": "Scale activity",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Nodes by CA state",
+          "description": "notStarted — машина ещё не в API (clone/boot). unready — зарегистрирована, но не Ready.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (state) (cluster_autoscaler_nodes_count{cluster=~\"$cluster\"})", "legendFormat": "{{state}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 20, "lineWidth": 1, "stacking": { "mode": "normal", "group": "A" }, "spanNulls": true } } }
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Unschedulable pods",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (type) (cluster_autoscaler_unschedulable_pods_count{cluster=~\"$cluster\"})", "legendFormat": "{{type}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": true } } }
+        },
+        {
+          "id": 16,
+          "type": "timeseries",
+          "title": "Scale-up / scale-down",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "sum(increase(cluster_autoscaler_scaled_up_nodes_total{cluster=~\"$cluster\"}[$__rate_interval]))", "legendFormat": "scaled up" },
+            { "refId": "B", "expr": "sum by (reason) (increase(cluster_autoscaler_scaled_down_nodes_total{cluster=~\"$cluster\"}[$__rate_interval]))", "legendFormat": "down {{reason}}" }
+          ],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": true } } }
+        },
+        {
+          "id": 17,
+          "type": "timeseries",
+          "title": "Failed / unregistered removed",
+          "description": "unregistered removed — CA снял ноду, которая не успела зарегистрироваться (медленный full clone).",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "sum by (reason) (increase(cluster_autoscaler_failed_scale_ups_total{cluster=~\"$cluster\"}[$__rate_interval]))", "legendFormat": "failed scale-up {{reason}}" },
+            { "refId": "B", "expr": "sum by (reason) (increase(cluster_autoscaler_failed_node_creations_total{cluster=~\"$cluster\"}[$__rate_interval]))", "legendFormat": "failed create {{reason}}" },
+            { "refId": "C", "expr": "sum(increase(cluster_autoscaler_old_unregistered_nodes_removed_count{cluster=~\"$cluster\"}[$__rate_interval]))", "legendFormat": "unregistered removed" }
+          ],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": true } } }
+        },
+        {
+          "id": 18,
+          "type": "row",
+          "title": "Scale-down blockers",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 }
+        },
+        {
+          "id": 19,
+          "type": "timeseries",
+          "title": "Unremovable nodes",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (reason) (cluster_autoscaler_unremovable_nodes_count{cluster=~\"$cluster\"})", "legendFormat": "{{reason}}" }],
+          "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 20, "lineWidth": 1, "stacking": { "mode": "normal", "group": "A" }, "spanNulls": true } } }
+        },
+        {
+          "id": 20,
+          "type": "timeseries",
+          "title": "Evictions / pending deletions",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "sum by (eviction_result) (increase(cluster_autoscaler_evicted_pods_total{cluster=~\"$cluster\"}[$__rate_interval]))", "legendFormat": "evict {{eviction_result}}" },
+            { "refId": "B", "expr": "sum(cluster_autoscaler_pending_node_deletions{cluster=~\"$cluster\"})", "legendFormat": "pending deletions" }
+          ],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": true } } }
+        },
+        {
+          "id": 21,
+          "type": "row",
+          "title": "Controller",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 }
+        },
+        {
+          "id": 22,
+          "type": "timeseries",
+          "title": "Loop duration p99",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 49 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "histogram_quantile(0.99, sum by (le, function) (rate(cluster_autoscaler_function_duration_seconds_bucket{cluster=~\"$cluster\"}[$__rate_interval])))", "legendFormat": "{{function}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 0, "lineWidth": 2, "spanNulls": true } } }
+        },
+        {
+          "id": 23,
+          "type": "timeseries",
+          "title": "Errors",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 49 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (type) (increase(cluster_autoscaler_errors_total{cluster=~\"$cluster\"}[$__rate_interval]))", "legendFormat": "{{type}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": true } } }
+        },
+        {
+          "id": 24,
+          "type": "timeseries",
+          "title": "Seconds since last activity",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 57 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "time() - cluster_autoscaler_last_activity{cluster=~\"$cluster\"}", "legendFormat": "{{activity}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 0, "lineWidth": 2, "spanNulls": true } } }
+        }
+      ]
+    }

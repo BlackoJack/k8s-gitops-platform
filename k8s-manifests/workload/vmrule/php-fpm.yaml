@@ -1,0 +1,69 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: php-fpm
+  namespace: monitoring
+spec:
+  groups:
+    - name: php-fpm
+      rules:
+        - alert: PhpFpmDown
+          expr: phpfpm_up == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PHP-FPM {{ $labels.namespace }}/{{ $labels.pod }} не отвечает"
+            description: "Экспортер не читает /status (phpfpm_up=0) уже 2 минуты. Пул www на 127.0.0.1:9000."
+            dashboard: "https://grafana.msk.corp.example/d/php-fpm?var-namespace={{ $labels.namespace | urlquery }}&var-pod={{ $labels.pod | urlquery }}"
+
+        - alert: PhpFpmExporterDown
+          expr: up{job="php-fpm"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "php-fpm-exporter {{ $labels.namespace }}/{{ $labels.pod }} недоступен"
+            description: "Порт metrics не отдаёт /metrics уже 2 минуты."
+            dashboard: "https://grafana.msk.corp.example/d/php-fpm?var-namespace={{ $labels.namespace | urlquery }}&var-pod={{ $labels.pod | urlquery }}"
+
+        - alert: PhpFpmMaxChildrenReached
+          expr: increase(phpfpm_max_children_reached[10m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PHP-FPM {{ $labels.namespace }}/{{ $labels.pod }} упёрся в pm.max_children"
+            description: "За 10 минут процесс-менеджер {{ $value | humanize }} раз не смог поднять ещё воркер. Новые запросы встают в listen queue."
+            dashboard: "https://grafana.msk.corp.example/d/php-fpm?var-namespace={{ $labels.namespace | urlquery }}&var-pod={{ $labels.pod | urlquery }}"
+
+        - alert: PhpFpmListenQueue
+          expr: phpfpm_listen_queue > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PHP-FPM {{ $labels.namespace }}/{{ $labels.pod }}: в очереди {{ $value }} запросов"
+            description: "Запросы ждут свободный воркер уже 5 минут. Пул не успевает."
+            dashboard: "https://grafana.msk.corp.example/d/php-fpm?var-namespace={{ $labels.namespace | urlquery }}&var-pod={{ $labels.pod | urlquery }}"
+
+        - alert: PhpFpmNoIdleWorkers
+          expr: phpfpm_idle_processes == 0 and phpfpm_up == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PHP-FPM {{ $labels.namespace }}/{{ $labels.pod }}: нет свободных воркеров"
+            description: "idle_processes = 0 уже 10 минут при живом пуле. Все воркеры заняты."
+            dashboard: "https://grafana.msk.corp.example/d/php-fpm?var-namespace={{ $labels.namespace | urlquery }}&var-pod={{ $labels.pod | urlquery }}"
+
+        - alert: PhpFpmWorkerMemoryHigh
+          expr: |
+            max by (namespace, pod, pool) (phpfpm_process_last_request_memory) > 100 * 1024 * 1024
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PHP-FPM {{ $labels.namespace }}/{{ $labels.pod }}: воркер {{ $value | humanize1024 }}B"
+            description: "Память последнего запроса выше 100Mi при memory_limit 128M в php.ini. Дальше запрос падает с Allowed memory size exhausted, под при этом не OOMKilled."
+            dashboard: "https://grafana.msk.corp.example/d/php-fpm?var-namespace={{ $labels.namespace | urlquery }}&var-pod={{ $labels.pod | urlquery }}"

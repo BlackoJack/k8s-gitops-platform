@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/kyverno.io/clusterpolicy_v1.json
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-probes
+  annotations:
+    policies.kyverno.io/title: Require Probes
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod, Deployment
+spec:
+  background: true
+  rules:
+    - name: validate-probes
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+                - DaemonSet
+                - StatefulSet
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - kyverno
+                - flux-system
+                - cattle-system
+                - cattle-fleet-system
+                - cattle-impersonation-system
+                - cattle-monitoring-system
+      validate:
+        failureAction: Audit
+        message: Liveness and readiness probes are required.
+        pattern:
+          spec:
+            template:
+              spec:
+                containers:
+                  - livenessProbe:
+                      periodSeconds: ">0"
+                    readinessProbe:
+                      periodSeconds: ">0"

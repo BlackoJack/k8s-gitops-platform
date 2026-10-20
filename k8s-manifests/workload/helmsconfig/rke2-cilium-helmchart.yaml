@@ -1,0 +1,14 @@
+# RKE2 default failurePolicy reinstalls a failed chart (uninstall → install),
+# which resets cilium-config to veth/tunnel and crashes agents that still
+# have netkit endpoints. abort leaves the last good release in place.
+# prune disabled: RKE2 owns the rest of the HelmChart object.
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: rke2-cilium
+  namespace: kube-system
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: merge
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  failurePolicy: abort

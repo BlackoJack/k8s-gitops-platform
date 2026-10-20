@@ -1,0 +1,365 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-php-fpm
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: PHP
+data:
+  php-fpm.json: |
+    {
+      "uid": "php-fpm",
+      "title": "PHP-FPM",
+      "description": "Пулы PHP-FPM (php-fpm-exporter). Скрейп по Service с app.kubernetes.io/component=php-fpm и monitoring.corp.example/scrape=true.",
+      "tags": ["platform", "php", "php-fpm"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "editable": true,
+      "graphTooltip": 1,
+      "time": { "from": "now-1h", "to": "now" },
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "dashboard",
+          "keepTime": true,
+          "title": "PHP CLI",
+          "type": "link",
+          "url": "/d/php-cli"
+        },
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "targetBlank": true,
+          "title": "Alertmanager",
+          "type": "link",
+          "url": "https://alertmanager.msk.corp.example"
+        }
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": { "text": "VictoriaMetrics Prometheus", "value": "VictoriaMetricsProm" },
+            "hide": 0
+          },
+          {
+            "name": "cluster",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(phpfpm_up, cluster)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "namespace",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(phpfpm_up{cluster=~\"$cluster\"}, namespace)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "pod",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(phpfpm_up{cluster=~\"$cluster\",namespace=~\"$namespace\"}, pod)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "pool",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(phpfpm_up{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"}, pool)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Overview",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "FPM",
+          "description": "phpfpm_up: экспортер читает /status.",
+          "gridPos": { "h": 4, "w": 3, "x": 0, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min by (namespace, pod, pool) (phpfpm_up{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"})", "legendFormat": "{{namespace}}/{{pod}} {{pool}}" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Exporter",
+          "description": "up{job=\"php-fpm\"}: порт metrics отдаёт /metrics.",
+          "gridPos": { "h": 4, "w": 3, "x": 3, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min by (namespace, pod) (up{job=\"php-fpm\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "{{namespace}}/{{pod}}" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Active",
+          "gridPos": { "h": 4, "w": 3, "x": 6, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (namespace, pod, pool) (phpfpm_active_processes{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"})", "legendFormat": "{{namespace}}/{{pod}} {{pool}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "decimals": 0 } }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Idle",
+          "description": "Алерт PhpFpmNoIdleWorkers: 0 уже 10 минут.",
+          "gridPos": { "h": 4, "w": 3, "x": 9, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (namespace, pod, pool) (phpfpm_idle_processes{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"})", "legendFormat": "{{namespace}}/{{pod}} {{pool}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Listen queue",
+          "description": "Алерт PhpFpmListenQueue: > 0 уже 5 минут.",
+          "gridPos": { "h": 4, "w": 3, "x": 12, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (namespace, pod, pool) (phpfpm_listen_queue{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"})", "legendFormat": "{{namespace}}/{{pod}} {{pool}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Accepted / s",
+          "gridPos": { "h": 4, "w": 3, "x": 15, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (namespace, pod, pool) (rate(phpfpm_accepted_connections{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}[5m]))", "legendFormat": "{{namespace}}/{{pod}} {{pool}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 1 } }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "max_children / 10m",
+          "description": "Алерт PhpFpmMaxChildrenReached: increase > 0 за 10 минут.",
+          "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (namespace, pod, pool) (increase(phpfpm_max_children_reached{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}[10m]))", "legendFormat": "{{namespace}}/{{pod}} {{pool}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Slow / 10m",
+          "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (namespace, pod, pool) (increase(phpfpm_slow_requests{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}[10m]))", "legendFormat": "{{namespace}}/{{pod}} {{pool}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 10,
+          "type": "row",
+          "title": "Pool",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Processes",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "phpfpm_active_processes{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}", "legendFormat": "{{namespace}}/{{pod}} {{pool}} active" },
+            { "refId": "B", "expr": "phpfpm_idle_processes{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}", "legendFormat": "{{namespace}}/{{pod}} {{pool}} idle" },
+            { "refId": "C", "expr": "phpfpm_total_processes{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}", "legendFormat": "{{namespace}}/{{pod}} {{pool}} total" }
+          ],
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 10, "lineWidth": 1 } } }
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Listen queue",
+          "description": "queue — сейчас в очереди, max — пик с старта FPM, length — размер сокета.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "phpfpm_listen_queue{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}", "legendFormat": "{{namespace}}/{{pod}} {{pool}} queue" },
+            { "refId": "B", "expr": "phpfpm_max_listen_queue{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}", "legendFormat": "{{namespace}}/{{pod}} {{pool}} max" },
+            { "refId": "C", "expr": "phpfpm_listen_queue_length{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}", "legendFormat": "{{namespace}}/{{pod}} {{pool}} length" }
+          ],
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 10, "lineWidth": 1 } } }
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "Accepted connections / s",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "rate(phpfpm_accepted_connections{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}[5m])", "legendFormat": "{{namespace}}/{{pod}} {{pool}}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10, "lineWidth": 1 } } }
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Saturation / s",
+          "description": "max_children_reached — pm не смог поднять воркер. slow_requests — запросы дольше request_slowlog_timeout.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "rate(phpfpm_max_children_reached{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}[5m])", "legendFormat": "{{namespace}}/{{pod}} {{pool}} max_children" },
+            { "refId": "B", "expr": "rate(phpfpm_slow_requests{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}[5m])", "legendFormat": "{{namespace}}/{{pod}} {{pool}} slow" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 10, "lineWidth": 1 } } }
+        },
+        {
+          "id": 15,
+          "type": "row",
+          "title": "Workers",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }
+        },
+        {
+          "id": 16,
+          "type": "timeseries",
+          "title": "Last request memory",
+          "description": "Память последнего запроса воркера. Красная линия — 100Mi, порог PhpFpmWorkerMemoryHigh. memory_limit в php.ini — 128M.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "max by (namespace, pod, pool) (phpfpm_process_last_request_memory{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"})", "legendFormat": "{{namespace}}/{{pod}} {{pool}} max" },
+            { "refId": "B", "expr": "avg by (namespace, pod, pool) (phpfpm_process_last_request_memory{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"})", "legendFormat": "{{namespace}}/{{pod}} {{pool}} avg" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": { "fillOpacity": 10, "lineWidth": 1, "thresholdsStyle": { "mode": "line" } },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 104857600 }] }
+            }
+          }
+        },
+        {
+          "id": 17,
+          "type": "timeseries",
+          "title": "Request duration",
+          "description": "Длительность текущего запроса воркера, микросекунды.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "max by (namespace, pod, pool) (phpfpm_process_request_duration{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"})", "legendFormat": "{{namespace}}/{{pod}} {{pool}} max" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "µs", "custom": { "fillOpacity": 10, "lineWidth": 1 } } }
+        },
+        {
+          "id": 18,
+          "type": "timeseries",
+          "title": "Last request CPU",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 31 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "max by (namespace, pod, pool) (phpfpm_process_last_request_cpu{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"})", "legendFormat": "{{namespace}}/{{pod}} {{pool}} max" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percent", "custom": { "fillOpacity": 10, "lineWidth": 1 } } }
+        },
+        {
+          "id": 19,
+          "type": "timeseries",
+          "title": "Worker state",
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 31 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "count by (namespace, pod, pool, state) (phpfpm_process_state{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"} == 1)", "legendFormat": "{{namespace}}/{{pod}} {{pool}} {{state}}" }
+          ],
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 40, "lineWidth": 1, "stacking": { "mode": "normal" } } } }
+        },
+        {
+          "id": 20,
+          "type": "timeseries",
+          "title": "FPM uptime",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 31 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "phpfpm_start_since{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",pool=~\"$pool\"}", "legendFormat": "{{namespace}}/{{pod}} {{pool}}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 1 } } }
+        },
+        {
+          "id": 21,
+          "type": "stat",
+          "title": "Firing PHP-FPM alerts",
+          "gridPos": { "h": 4, "w": 24, "x": 0, "y": 39 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(ALERTS{alertname=~\"PhpFpm.+\",alertstate=\"firing\"}) or vector(0)", "legendFormat": "firing" }],
+          "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        }
+      ]
+    }

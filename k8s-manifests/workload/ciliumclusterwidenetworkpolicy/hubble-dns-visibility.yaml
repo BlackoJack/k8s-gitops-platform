@@ -1,0 +1,36 @@
+# Hubble DNS metrics (hubble_dns_queries_total) require L7 DNS visibility:
+# traffic must pass through the Cilium proxy. L4 UDP/53 alone is not enough.
+# See https://docs.cilium.io/en/stable/observability/visibility/
+#
+# Permits all egress (toEntities: all). The DNS toPorts rule only adds L7 parsing
+# for port 53. kube-system is excluded so CoreDNS / node-local-dns are not proxied.
+# external-dns is excluded: RFC 2136 AXFR/TSIG on TCP/53 cannot survive the DNS
+# proxy (miekg/dns: "no signature found") even when dig from a laptop works.
+# blackbox-exporter is excluded so Technitium UDP/53 probes hit dns-* directly.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: hubble-dns-l7-visibility
+spec:
+  description: Enable Hubble DNS L7 metrics for workload pods (Grafana DNS Overview dashboard)
+  endpointSelector:
+    matchExpressions:
+      - key: io.kubernetes.pod.namespace
+        operator: NotIn
+        values:
+          - kube-system
+          - external-dns
+      - key: app.kubernetes.io/name
+        operator: NotIn
+        values:
+          - prometheus-blackbox-exporter
+  egress:
+    - toEntities:
+        - all
+    - toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"

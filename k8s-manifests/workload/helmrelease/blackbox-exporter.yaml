@@ -1,0 +1,137 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: blackbox-exporter
+  namespace: monitoring
+spec:
+  interval: 30m
+  timeout: 10m
+  releaseName: blackbox-exporter
+  chart:
+    spec:
+      chart: prometheus-blackbox-exporter
+      version: "11.12.0"
+      interval: 1h
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: monitoring
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    fullnameOverride: blackbox-exporter
+    replicas: 1
+    nodeSelector:
+      environment: infra
+    tolerations:
+      - key: environment
+        operator: Equal
+        value: infra
+        effect: PreferNoSchedule
+    dnsConfig:
+      options:
+        - name: ndots
+          value: "1"
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+    config:
+      modules:
+        http_2xx:
+          prober: http
+          timeout: 15s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            follow_redirects: true
+            preferred_ip_protocol: ip4
+        http_200:
+          prober: http
+          timeout: 15s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            valid_status_codes: [200]
+            method: GET
+            follow_redirects: true
+            preferred_ip_protocol: ip4
+        # One GET / per vhost, pinned to a balancer via the hostname probe
+        # parameter (Host + SNI). Redirects stay off so a 30x cannot leave
+        # that balancer. 3xx means the vhost answered. 404 does not: a missing
+        # page on a normal site is a failure.
+        http_vhost:
+          prober: http
+          timeout: 10s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            valid_status_codes: [200, 204, 301, 302, 303, 307, 308, 401, 403]
+            method: GET
+            follow_redirects: false
+            preferred_ip_protocol: ip4
+            fail_if_not_ssl: true
+        # api.* has no document at /. 404 there is the app answering.
+        # 5xx, timeout and a bad certificate still fail the probe.
+        http_vhost_api:
+          prober: http
+          timeout: 10s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            valid_status_codes: [200, 204, 301, 302, 303, 307, 308, 401, 403, 404]
+            method: GET
+            follow_redirects: false
+            preferred_ip_protocol: ip4
+            fail_if_not_ssl: true
+        # The app session endpoint rejects calls without a client id header.
+        # The probe sends a static value, the same way the frontend does.
+        http_200_app_session:
+          prober: http
+          timeout: 15s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            valid_status_codes: [200]
+            method: GET
+            follow_redirects: false
+            preferred_ip_protocol: ip4
+            headers:
+              Accept: application/json
+              x-pixel-id: uptime-probe
+            fail_if_body_not_matches_regexp:
+              - '"status"\s*:\s*true'
+        # Technitium dns-1/2. Probe the nameserver itself (UDP/53), not CoreDNS.
+        dns_soa_msk:
+          prober: dns
+          timeout: 5s
+          dns:
+            query_name: msk.corp.example
+            query_type: SOA
+            transport_protocol: udp
+            preferred_ip_protocol: ip4
+            valid_rcodes: [NOERROR]
+        dns_soa_corp:
+          prober: dns
+          timeout: 5s
+          dns:
+            query_name: corp.example
+            query_type: SOA
+            transport_protocol: udp
+            preferred_ip_protocol: ip4
+            valid_rcodes: [NOERROR]

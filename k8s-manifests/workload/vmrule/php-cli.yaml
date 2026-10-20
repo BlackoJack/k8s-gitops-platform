@@ -1,0 +1,33 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: php-cli
+  namespace: monitoring
+spec:
+  groups:
+    - name: php-cli
+      rules:
+        - alert: PhpCliExporterDown
+          expr: up{job="php-cli"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "php-cli-exporter {{ $labels.namespace }}/{{ $labels.pod }} недоступен"
+            description: "Порт metrics не отдаёт /metrics уже 2 минуты. Это cron, не PHP-FPM."
+            dashboard: "https://grafana.msk.corp.example/d/php-cli?var-namespace={{ $labels.namespace | urlquery }}&var-pod={{ $labels.pod | urlquery }}"
+
+        - alert: PhpCliMemoryHigh
+          expr: |
+            (
+              php_cli_memory_rss_bytes
+              / on (namespace, pod) group_left
+              php_cli_memory_limit_bytes
+            ) > 0.8
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cron PHP {{ $labels.namespace }}/{{ $labels.pod }} {{ $labels.command }}: {{ $value | humanizePercentage }} лимита"
+            description: "RSS процесса выше 80% memory_limit из cron.ini. Дальше PHP упадёт с Allowed memory size exhausted. Команды с ini_set(memory_limit, -1) этот лимит не соблюдают и могут упереться в cgroup."
+            dashboard: "https://grafana.msk.corp.example/d/php-cli?var-namespace={{ $labels.namespace | urlquery }}&var-pod={{ $labels.pod | urlquery }}&var-command={{ $labels.command | urlquery }}"

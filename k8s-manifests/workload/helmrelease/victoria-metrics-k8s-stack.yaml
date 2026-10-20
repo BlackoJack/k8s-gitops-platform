@@ -1,0 +1,980 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: victoria-metrics-k8s-stack
+  namespace: monitoring
+spec:
+  interval: 10m
+  timeout: 25m
+  releaseName: vmks
+  chart:
+    spec:
+      chart: victoria-metrics-k8s-stack
+      version: ">=0.85.0"
+      interval: 1h
+      sourceRef:
+        kind: HelmRepository
+        name: victoriametrics
+        namespace: monitoring
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    disableWaitForJobs: true
+    remediation:
+      retries: 5
+  upgrade:
+    crds: CreateReplace
+    # sync-job (dashboards/rules from GitHub) is a post-upgrade hook.
+    # When it fails, helm rolls back the whole stack — including
+    # clusterDomainName — and Flux stalls at RetriesExceeded.
+    disableWaitForJobs: true
+    remediation:
+      retries: 3
+
+  values:
+    fullnameOverride: vmks
+    tenant: "0"
+
+    global:
+      clusterLabel: cluster
+
+    victoria-metrics-operator:
+      enabled: true
+      crds:
+        plain: true
+      admissionWebhooks:
+        policy: Ignore
+      operator:
+        disable_prometheus_converter: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      podSecurityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 256Mi
+      nodeSelector: &ns-infra
+        environment: infra
+      tolerations: &tol-infra
+        - key: environment
+          operator: Equal
+          value: infra
+          effect: PreferNoSchedule
+
+    defaultDatasources:
+      victoriametrics:
+        datasources:
+          - name: VictoriaMetrics
+            type: victoriametrics-metrics-datasource
+            access: proxy
+            uid: VictoriaMetrics
+            isDefault: true
+          - name: VictoriaMetrics Prometheus
+            type: prometheus
+            access: proxy
+            uid: VictoriaMetricsProm
+            isDefault: false
+          # Rancher Cluster Explorer iframes use var-datasource=prometheus.
+          - name: Prometheus
+            type: prometheus
+            access: proxy
+            uid: prometheus
+            isDefault: false
+      victorialogs:
+        datasources:
+          - name: VictoriaLogs
+            access: proxy
+            uid: VictoriaLogs
+            type: victoriametrics-logs-datasource
+      victoriatraces:
+        datasources:
+          - name: VictoriaTraces
+            access: proxy
+            uid: VictoriaTraces
+            type: jaeger
+            jsonData:
+              nodeGraph:
+                enabled: true
+              tracesToLogsV2:
+                datasourceUid: VictoriaLogs
+                spanStartTimeShift: "-1h"
+                spanEndTimeShift: "1h"
+
+    defaultDashboards:
+      enabled: true
+
+    # Hook fetches dashboards/rules from GitHub. A failed/hung Job fails the
+    # helm upgrade and Flux rolls back the whole stack (including
+    # clusterDomainName). disableWaitForJobs does not skip hook Jobs.
+    syncJob:
+      enabled: true
+      nodeSelector: *ns-infra
+      tolerations: *tol-infra
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
+      podSecurityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
+
+    defaultRules:
+      enabled: true
+      # Replaced by vmrule/storage.yaml: exclude always-full NFS shares
+      # Two static NFS shares (nfs-claim5/6, app prod and staging) stay full by design.
+      rules:
+        KubePersistentVolumeFillingUp:
+          enabled: false
+        KubePersistentVolumeInodesFillingUp:
+          enabled: false
+      groups:
+        # Default TooManyLogs is increase(warn)[5m] > 0 for 15m. vmagent logs
+        # every scrape blip (gitlab-exporter 500, draining node) at warn and
+        # stays firing. Scrape failures are TooManyScrapeErrors + up{} alerts.
+        vm-health:
+          rules:
+            TooManyLogs:
+              spec:
+                expr: sum(increase(vm_log_messages_total{level="warn",job!~"vmagent.*"}[5m])) without(app_version,location,is_printed) > 0
+            # job=~".*vmagent.*" also matches vmagent-*-reloader-http. Sidecar
+            # 8435 is down for minutes while STS remounts NFS — not vmagent down.
+            ServiceDown:
+              spec:
+                expr: up{job=~".*(victoriametrics|vmselect|vminsert|vmstorage|vmagent|vmalert|vmsingle|vmalertmanager|vmauth).*",job!~".*reloader.*"} == 0
+        etcd:
+          enabled: false
+        kube-scheduler.rules:
+          enabled: false
+        kubernetes-system-controller-manager:
+          enabled: false
+        kubernetes-system-scheduler:
+          enabled: false
+        kube-prometheus-general.rules:
+          enabled: false
+
+    vmsingle:
+      enabled: false
+
+    vmcluster:
+      enabled: true
+      spec:
+        clusterVersion: "v1.150.0-cluster"
+        # Without this, operator sets -storageNode=pod.svc.ns (2 dots).
+        # kubelet ndots:5 then searches ns.svc.cluster.local first →
+        # pod.svc.ns.ns.svc.cluster.local NXDOMAIN, then the real FQDN.
+        clusterDomainName: cluster.local.
+        retentionPeriod: "30d"
+        replicationFactor: 2
+        vmstorage:
+          replicaCount: 2
+          nodeSelector: *ns-infra
+          tolerations: *tol-infra
+          # 3Gi vmstorage + Kafka 1.6Gi / sentry-web 2Gi on 8Gi infra
+          # fills the node (fntg8 → NodeMemoryHighUtilization).
+          # namespaces is required: both targets live in sentry, vmstorage
+          # in monitoring, and an empty namespaces list matches only its own.
+          # 3Gi request on an 8Gi node; descheduler must not move it.
+          podMetadata:
+            annotations:
+              descheduler.alpha.kubernetes.io/prefer-no-eviction: "true"
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: kafka
+                      app.kubernetes.io/instance: sentry
+                  namespaces:
+                    - sentry
+                  topologyKey: kubernetes.io/hostname
+                - labelSelector:
+                    matchLabels:
+                      app: sentry
+                      role: web
+                  namespaces:
+                    - sentry
+                  topologyKey: kubernetes.io/hostname
+          resources:
+            requests:
+              cpu: 500m
+              memory: 3Gi
+            limits:
+              memory: 3Gi
+          securityContext: &pss-pod-sc
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: vmstorage
+              securityContext: &pss-ctr-sc
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+              livenessProbe:
+                httpGet:
+                  path: /health
+                  port: 8482
+                  scheme: HTTP
+                periodSeconds: 15
+                timeoutSeconds: 5
+                failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8482
+              scheme: HTTP
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 10
+          storage:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: ha-nfs
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 50Gi
+        vmselect:
+          enabled: true
+          replicaCount: 2
+          nodeSelector: *ns-infra
+          tolerations: *tol-infra
+          extraArgs:
+            search.maxUniqueTimeseries: "1000000"
+            search.maxQueryDuration: "60s"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+            limits:
+              memory: 1Gi
+          securityContext: *pss-pod-sc
+          containers:
+            - name: vmselect
+              securityContext: *pss-ctr-sc
+          storage:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: ha-nfs
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 5Gi
+        vminsert:
+          enabled: true
+          replicaCount: 2
+          nodeSelector: *ns-infra
+          tolerations: *tol-infra
+          affinity:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: vminsert
+                        app.kubernetes.io/instance: vmks
+                    topologyKey: kubernetes.io/hostname
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+            limits:
+              memory: 1Gi
+          securityContext: *pss-pod-sc
+          containers:
+            - name: vminsert
+              securityContext: *pss-ctr-sc
+      # Public hosts go through vmauth (vmauth/edge.yaml, ingress/vm-edge.yaml).
+      ingress:
+        select:
+          enabled: false
+          ingressClassName: cilium
+          labels:
+            external-dns.corp.example/enabled: "true"
+          annotations:
+            kubernetes.io/ingress.class: cilium
+          hosts:
+            - vmui.msk.corp.example
+          tls:
+            - hosts:
+                - vmui.msk.corp.example
+        insert:
+          enabled: false
+          ingressClassName: cilium
+          labels:
+            external-dns.corp.example/enabled: "true"
+          annotations:
+            kubernetes.io/ingress.class: cilium
+          hosts:
+            - vminsert.msk.corp.example
+          tls:
+            - hosts:
+                - vminsert.msk.corp.example
+
+    vlcluster:
+      enabled: true
+      spec:
+        clusterVersion: v1.52.0
+        clusterDomainName: cluster.local.
+        vlstorage:
+          replicaCount: 2
+          retentionPeriod: 14d
+          nodeSelector: *ns-infra
+          tolerations: *tol-infra
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+            limits:
+              memory: 1Gi
+          securityContext: *pss-pod-sc
+          containers:
+            - name: vlstorage
+              securityContext: *pss-ctr-sc
+              livenessProbe:
+                httpGet:
+                  path: /health
+                  port: 9491
+                  scheme: HTTP
+                periodSeconds: 15
+                timeoutSeconds: 5
+                failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9491
+              scheme: HTTP
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 10
+          storage:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: ha-nfs
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 40Gi
+        vlselect:
+          enabled: true
+          replicaCount: 2
+          nodeSelector: *ns-infra
+          tolerations: *tol-infra
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+          securityContext: *pss-pod-sc
+          containers:
+            - name: vlselect
+              securityContext: *pss-ctr-sc
+        vlinsert:
+          enabled: true
+          replicaCount: 2
+          nodeSelector: *ns-infra
+          tolerations: *tol-infra
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+          securityContext: *pss-pod-sc
+          containers:
+            - name: vlinsert
+              securityContext: *pss-ctr-sc
+      ingress:
+        vlselect:
+          enabled: false
+          ingressClassName: cilium
+          labels:
+            external-dns.corp.example/enabled: "true"
+          annotations:
+            kubernetes.io/ingress.class: cilium
+          hosts:
+            - logs.msk.corp.example
+          tls:
+            - hosts:
+                - logs.msk.corp.example
+        vlinsert:
+          enabled: false
+          ingressClassName: cilium
+          labels:
+            external-dns.corp.example/enabled: "true"
+          annotations:
+            kubernetes.io/ingress.class: cilium
+          hosts:
+            - vlinsert.msk.corp.example
+          tls:
+            - hosts:
+                - vlinsert.msk.corp.example
+
+    vlagent:
+      enabled: true
+      rbac:
+        namespaced: false
+      spec:
+        port: "9429"
+        disableSelfServiceScrape: true
+        tolerations:
+          - operator: Exists
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node-role.kubernetes.io/control-plane
+                      operator: DoesNotExist
+                    - key: node-role.kubernetes.io/master
+                      operator: DoesNotExist
+        extraArgs:
+          remoteWrite.headers: "VL-Extra-Fields: cluster=workload"
+        k8sCollector:
+          enabled: true
+          # First non-empty field becomes _msg. Defaults are message,msg,log.
+          # Extra names cover JSON without those:
+          # nginx access (request / request_uri / uri), sentry-snuba tracing
+          # (fields.message), sentry-relay (error), gitlab-ci helper (script).
+          msgFields:
+            - message
+            - msg
+            - log
+            - fields.message
+            - request
+            - request_uri
+            - uri
+            - error
+            - script
+        resources:
+          requests:
+            cpu: 50m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+        securityContext: *pss-pod-sc
+        containers:
+          - name: vlagent
+            securityContext: *pss-ctr-sc
+
+    vtcluster:
+      enabled: true
+      spec:
+        clusterVersion: v0.9.4
+        clusterDomainName: cluster.local.
+        vtstorage:
+          replicaCount: 2
+          retentionPeriod: 14d
+          nodeSelector: *ns-infra
+          tolerations: *tol-infra
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+          securityContext: *pss-pod-sc
+          containers:
+            - name: vtstorage
+              securityContext: *pss-ctr-sc
+              livenessProbe:
+                httpGet:
+                  path: /health
+                  port: 10491
+                  scheme: HTTP
+                periodSeconds: 15
+                timeoutSeconds: 5
+                failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 10491
+              scheme: HTTP
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 10
+          storage:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: ha-nfs
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 20Gi
+        vtselect:
+          enabled: true
+          replicaCount: 2
+          nodeSelector: *ns-infra
+          tolerations: *tol-infra
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+          securityContext: *pss-pod-sc
+          containers:
+            - name: vtselect
+              securityContext: *pss-ctr-sc
+        vtinsert:
+          enabled: true
+          replicaCount: 2
+          nodeSelector: *ns-infra
+          tolerations: *tol-infra
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+          securityContext: *pss-pod-sc
+          containers:
+            - name: vtinsert
+              securityContext: *pss-ctr-sc
+      ingress:
+        vtinsert:
+          enabled: false
+          ingressClassName: cilium
+          labels:
+            external-dns.corp.example/enabled: "true"
+          annotations:
+            kubernetes.io/ingress.class: cilium
+          hosts:
+            - traces.msk.corp.example
+          tls:
+            - hosts:
+                - traces.msk.corp.example
+
+    alertmanager:
+      enabled: true
+      spec:
+        replicaCount: 1
+        dnsConfig: &dns-ndots1
+          options:
+            - name: ndots
+              value: "1"
+        nodeSelector: *ns-infra
+        tolerations: *tol-infra
+        externalURL: https://alertmanager.msk.corp.example
+        disableNamespaceMatcher: true
+        configSelector:
+          matchLabels:
+            vmalertmanagerConfig: main
+        secrets:
+          - telegram-bot-token
+          - zulip-webhook
+          - zulip-webhook-uptime
+          - zulip-webhook-domains
+        resources:
+          requests:
+            cpu: 20m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+        securityContext: *pss-pod-sc
+        containers:
+          - name: alertmanager
+            securityContext: *pss-ctr-sc
+          - name: config-reloader
+            securityContext: *pss-ctr-sc
+        initContainers:
+          - name: config-init
+            securityContext: *pss-ctr-sc
+      ingress:
+        enabled: true
+        ingressClassName: cilium
+        labels:
+          external-dns.corp.example/enabled: "true"
+        annotations:
+          kubernetes.io/ingress.class: cilium
+        hosts:
+          - alertmanager.msk.corp.example
+        tls:
+          - hosts:
+              - alertmanager.msk.corp.example
+
+    vmalert:
+      enabled: true
+      spec:
+        nodeSelector: *ns-infra
+        tolerations: *tol-infra
+        evaluationInterval: 20s
+        selectAllByDefault: true
+        extraArgs:
+          http.pathPrefix: "/"
+          external.url: https://grafana.msk.corp.example
+        resources:
+          requests:
+            cpu: 50m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+        securityContext: *pss-pod-sc
+        containers:
+          - name: vmalert
+            securityContext: *pss-ctr-sc
+          - name: config-reloader
+            securityContext: *pss-ctr-sc
+        # VMAlert treats spec.initContainers as extra containers (append),
+        # not a merge-by-name patch. Overlaying config-init duplicates it and
+        # the operator cannot update the Deployment.
+
+    vmagent:
+      enabled: true
+      rbac:
+        namespaced: false
+      spec:
+        replicaCount: 1
+        selectAllByDefault: true
+        scrapeInterval: 20s
+        nodeSelector: *ns-infra
+        tolerations: *tol-infra
+        statefulMode: true
+        statefulStorage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: ha-nfs
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 10Gi
+        externalLabels:
+          cluster: workload
+        extraArgs:
+          promscrape.streamParse: "true"
+          # k8s 1.36 apiserver /metrics is already ~16MiB per instance and exceeds the 16MiB default
+          promscrape.maxScrapeSize: "64MB"
+          # Default 0s logs every scrape fail at warn with the full HTML body
+          # (gitlab-exporter 500, terminating pods) and fires TooManyLogs.
+          promscrape.suppressScrapeErrorsDelay: "5m"
+          loggerMaxArgLen: "256"
+        dnsConfig: *dns-ndots1
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            memory: 1Gi
+        securityContext: *pss-pod-sc
+        containers:
+          - name: vmagent
+            securityContext: *pss-ctr-sc
+          - name: config-reloader
+            securityContext: *pss-ctr-sc
+        initContainers:
+          - name: config-init
+            securityContext: *pss-ctr-sc
+
+    grafana:
+      enabled: true
+      dnsConfig: *dns-ndots1
+      nodeSelector: *ns-infra
+      tolerations: *tol-infra
+      admin:
+        existingSecret: grafana-admin
+        userKey: admin-user
+        passwordKey: admin-password
+      plugins:
+        - victoriametrics-logs-datasource
+        - victoriametrics-metrics-datasource
+        - grafana-sentry-datasource
+        - yesoreyeram-infinity-datasource
+      grafana.ini:
+        server:
+          root_url: https://grafana.msk.corp.example
+          domain: grafana.msk.corp.example
+        dashboards:
+          default_home_dashboard_path: /var/lib/grafana/dashboards/default/overview.json
+        users:
+          default_theme: dark
+          auto_assign_org_role: Viewer
+        unified_alerting:
+          enabled: true
+        security:
+          allow_embedding: true
+        auth.anonymous:
+          enabled: true
+          org_role: Viewer
+      # PVC is NFS with mountPermissions 0777 and fsGroup 472; chown-as-root is not needed.
+      initChownData:
+        enabled: false
+      persistence:
+        enabled: true
+        storageClassName: ha-nfs
+        size: 10Gi
+        accessModes:
+          - ReadWriteOnce
+      sidecar:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
+        dashboards:
+          enabled: true
+          multicluster: true
+          label: grafana_dashboard
+          labelValue: "1"
+          folderAnnotation: grafana_folder
+          searchNamespace: ALL
+        datasources:
+          enabled: true
+          label: grafana_datasource
+          labelValue: "1"
+      ingress:
+        enabled: true
+        ingressClassName: cilium
+        labels:
+          external-dns.corp.example/enabled: "true"
+        annotations:
+          kubernetes.io/ingress.class: cilium
+        hosts:
+          - grafana.msk.corp.example
+        tls:
+          - hosts:
+              - grafana.msk.corp.example
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 768Mi
+
+    # Grafana datasource proxy (vmauth-vmks-internal).
+    internal:
+      vmauth:
+        spec:
+          securityContext: *pss-pod-sc
+          containers:
+            - name: vmauth
+              securityContext: *pss-ctr-sc
+            - name: config-reloader
+              securityContext: *pss-ctr-sc
+          initContainers:
+            - name: config-init
+              securityContext: *pss-ctr-sc
+
+    kubeProxy:
+      enabled: false
+    kubeControllerManager:
+      enabled: false
+    kubeScheduler:
+      enabled: false
+    kubeEtcd:
+      enabled: false
+    kubeApiServer:
+      enabled: true
+    kubelet:
+      enabled: true
+      vmScrape:
+        spec:
+          relabelConfigs:
+            - action: labelmap
+              regex: __meta_kubernetes_node_label_(.+)
+            - sourceLabels: [__metrics_path__]
+              targetLabel: metrics_path
+            - targetLabel: job
+              replacement: kubelet
+            - sourceLabels: [__meta_kubernetes_node_name]
+              targetLabel: instance
+    coreDns:
+      enabled: true
+
+    prometheus-node-exporter:
+      enabled: true
+      tolerations:
+        - operator: Exists
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+      vmScrape:
+        spec:
+          endpoints:
+            - port: metrics
+              relabelConfigs:
+                - sourceLabels: [__meta_kubernetes_pod_node_name]
+                  targetLabel: instance
+              metricRelabelConfigs:
+                - action: drop
+                  sourceLabels: [mountpoint]
+                  regex: "/var/lib/kubelet/pods.+"
+
+    kube-state-metrics:
+      enabled: true
+      nodeSelector: *ns-infra
+      tolerations: *tol-infra
+      # Helm deploy alerts read owner/name/status/version from helm.sh/release secrets.
+      metricLabelsAllowlist:
+        - "secrets=[owner,name,status,version]"
+      resources:
+        requests:
+          cpu: 20m
+          memory: 96Mi
+        limits:
+          memory: 256Mi
+      rbac:
+        extraRules:
+          - apiGroups: ["autoscaling.k8s.io"]
+            resources: ["verticalpodautoscalers"]
+            verbs: ["list", "watch"]
+      # Built-in VPA collector removed in kube-state-metrics 2.9.
+      # Skip annotations/labels Info metrics — helm annotations explode cardinality.
+      customResourceState:
+        enabled: true
+        config:
+          kind: CustomResourceStateMetrics
+          spec:
+            resources:
+              - groupVersionKind:
+                  group: autoscaling.k8s.io
+                  kind: VerticalPodAutoscaler
+                  version: "v1"
+                labelsFromPath:
+                  namespace: [metadata, namespace]
+                  target_api_version: [spec, targetRef, apiVersion]
+                  target_kind: [spec, targetRef, kind]
+                  target_name: [spec, targetRef, name]
+                  verticalpodautoscaler: [metadata, name]
+                metricNamePrefix: "kube"
+                metrics:
+                  - name: "verticalpodautoscaler_spec_updatepolicy_updatemode"
+                    help: "Update mode of the VerticalPodAutoscaler."
+                    each:
+                      type: StateSet
+                      stateSet:
+                        labelName: "update_mode"
+                        path: [spec, updatePolicy, updateMode]
+                        list: ["Auto", "Initial", "Off", "Recreate", "InPlaceOrRecreate", "InPlace"]
+                  - name: "verticalpodautoscaler_status_recommendation_containerrecommendations_lowerbound_memory"
+                    help: "VPA lower-bound memory recommendation."
+                    commonLabels:
+                      unit: "byte"
+                      resource: "memory"
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, recommendation, containerRecommendations]
+                        labelsFromPath:
+                          container: [containerName]
+                        valueFrom: [lowerBound, memory]
+                  - name: "verticalpodautoscaler_status_recommendation_containerrecommendations_lowerbound_cpu"
+                    help: "VPA lower-bound CPU recommendation."
+                    commonLabels:
+                      unit: "core"
+                      resource: "cpu"
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, recommendation, containerRecommendations]
+                        labelsFromPath:
+                          container: [containerName]
+                        valueFrom: [lowerBound, cpu]
+                  - name: "verticalpodautoscaler_status_recommendation_containerrecommendations_upperbound_memory"
+                    help: "VPA upper-bound memory recommendation."
+                    commonLabels:
+                      unit: "byte"
+                      resource: "memory"
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, recommendation, containerRecommendations]
+                        labelsFromPath:
+                          container: [containerName]
+                        valueFrom: [upperBound, memory]
+                  - name: "verticalpodautoscaler_status_recommendation_containerrecommendations_upperbound_cpu"
+                    help: "VPA upper-bound CPU recommendation."
+                    commonLabels:
+                      unit: "core"
+                      resource: "cpu"
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, recommendation, containerRecommendations]
+                        labelsFromPath:
+                          container: [containerName]
+                        valueFrom: [upperBound, cpu]
+                  - name: "verticalpodautoscaler_status_recommendation_containerrecommendations_target_memory"
+                    help: "VPA target memory recommendation."
+                    commonLabels:
+                      unit: "byte"
+                      resource: "memory"
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, recommendation, containerRecommendations]
+                        labelsFromPath:
+                          container: [containerName]
+                        valueFrom: [target, memory]
+                  - name: "verticalpodautoscaler_status_recommendation_containerrecommendations_target_cpu"
+                    help: "VPA target CPU recommendation."
+                    commonLabels:
+                      unit: "core"
+                      resource: "cpu"
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, recommendation, containerRecommendations]
+                        labelsFromPath:
+                          container: [containerName]
+                        valueFrom: [target, cpu]
+                  - name: "verticalpodautoscaler_status_recommendation_containerrecommendations_uncappedtarget_memory"
+                    help: "VPA uncapped target memory recommendation."
+                    commonLabels:
+                      unit: "byte"
+                      resource: "memory"
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, recommendation, containerRecommendations]
+                        labelsFromPath:
+                          container: [containerName]
+                        valueFrom: [uncappedTarget, memory]
+                  - name: "verticalpodautoscaler_status_recommendation_containerrecommendations_uncappedtarget_cpu"
+                    help: "VPA uncapped target CPU recommendation."
+                    commonLabels:
+                      unit: "core"
+                      resource: "cpu"
+                    each:
+                      type: Gauge
+                      gauge:
+                        path: [status, recommendation, containerRecommendations]
+                        labelsFromPath:
+                          container: [containerName]
+                        valueFrom: [uncappedTarget, cpu]

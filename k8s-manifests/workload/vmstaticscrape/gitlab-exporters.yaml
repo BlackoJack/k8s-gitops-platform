@@ -1,0 +1,212 @@
+# Omnibus exporters on gitlab.corp.example (10.16.1.10).
+# Prometheus 200: 443/-/metrics, 9168, 9121, 9187, 9100, 8082, 9229, 5001, 9236, 8151, 9999/metrics (VTS).
+# :9999/nginx_status remains stub_status and is not scraped.
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-exporter
+  namespace: monitoring
+spec:
+  jobName: gitlab-exporter
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:9168
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 20s
+      metricRelabelConfigs:
+        - sourceLabels: [__name__]
+          regex: gitlab_pg_sequences_.+
+          action: drop
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-exporter
+        - targetLabel: instance
+          replacement: gitlab.corp.example
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-redis
+  namespace: monitoring
+spec:
+  jobName: gitlab-redis
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:9121
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 15s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-redis
+        - targetLabel: instance
+          replacement: gitlab.corp.example
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-postgres
+  namespace: monitoring
+spec:
+  jobName: gitlab-postgres
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:9187
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 25s
+      # ~2.9MB raw: per-table statio + relation size. Keep settings/activity/locks.
+      metricRelabelConfigs:
+        - sourceLabels: [__name__]
+          regex: pg_statio_user_tables_.+|pg_total_relation_size_bytes
+          action: drop
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-postgres
+        - targetLabel: instance
+          replacement: gitlab.corp.example
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-node
+  namespace: monitoring
+spec:
+  jobName: gitlab-node
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:9100
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 15s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-node
+        - targetLabel: instance
+          replacement: gitlab.corp.example
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-sidekiq
+  namespace: monitoring
+spec:
+  jobName: gitlab-sidekiq
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:8082
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 28s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-sidekiq
+        - targetLabel: instance
+          replacement: gitlab.corp.example
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-workhorse
+  namespace: monitoring
+spec:
+  jobName: gitlab-workhorse
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:9229
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 15s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-workhorse
+        - targetLabel: instance
+          replacement: gitlab.corp.example
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-gitaly
+  namespace: monitoring
+spec:
+  jobName: gitlab-gitaly
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:9236
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 20s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-gitaly
+        - targetLabel: instance
+          replacement: gitlab.corp.example
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-registry
+  namespace: monitoring
+spec:
+  jobName: gitlab-registry
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:5001
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 15s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-registry
+        - targetLabel: instance
+          replacement: gitlab.corp.example
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-kas
+  namespace: monitoring
+spec:
+  jobName: gitlab-kas
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:8151
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 15s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-kas
+        - targetLabel: instance
+          replacement: gitlab.corp.example
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab-nginx
+  namespace: monitoring
+spec:
+  jobName: gitlab-nginx
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example:9999
+      scheme: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 15s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-nginx
+        - targetLabel: instance
+          replacement: gitlab.corp.example

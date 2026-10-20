@@ -1,0 +1,96 @@
+# Ingress → Technitium via RFC 2136 (TSIG). Opt-in only:
+#
+#   metadata.labels:
+#     external-dns.corp.example/enabled: "true"
+#
+# Ingress: hostname from spec.rules[].host, target from
+# status.loadBalancer.ingress.
+# Service (LoadBalancer): hostname from
+# external-dns.alpha.kubernetes.io/hostname, target from Service LB IP.
+# DNSEndpoint CR (source crd): explicit A records, used for the root
+# API VIP which does not live in this cluster.
+#
+# Technitium, once per zone (msk.corp.example, corp.example), not in git:
+#   Options → Dynamic Updates (RFC 2136) → Allow
+#   Security Policy: TSIG key "external-dns", domain "*.<zone>" and the apex,
+#     allowed types A, AAAA, CNAME, TXT
+#   Zone Transfer: Allow (or Allow Only Specified Name Servers)
+#   Zone Transfer TSIG Key Names: обязательно выбрать "external-dns".
+#     Иначе AXFR уходит без подписи → "dns: no signature found", sync слепой.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-dns
+  namespace: external-dns
+spec:
+  interval: 30m
+  timeout: 10m
+  releaseName: external-dns
+  chart:
+    spec:
+      chart: external-dns
+      version: "1.21.1"
+      interval: 1h
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+        namespace: flux-system
+  install:
+    createNamespace: true
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    replicaCount: 1
+    logLevel: info
+    policy: sync
+    txtOwnerId: workload
+    sources:
+      - ingress
+      - service
+      - crd
+    labelFilter: external-dns.corp.example/enabled=true
+    domainFilters:
+      - msk.corp.example
+      - corp.example
+    interval: 1m
+    triggerLoopOnEvent: true
+    provider:
+      name: rfc2136
+    extraArgs:
+      rfc2136-host: dns-1.corp.example
+      rfc2136-port: "53"
+      rfc2136-zone:
+        - msk.corp.example
+        - corp.example
+      rfc2136-tsig-secret-alg: hmac-sha256
+      rfc2136-tsig-keyname: external-dns
+      rfc2136-tsig-axfr: true
+      service-type-filter: LoadBalancer
+    env:
+      - name: EXTERNAL_DNS_RFC2136_TSIG_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: external-dns-rfc2136-tsig
+            key: tsig-secret
+    commonLabels:
+      monitoring.corp.example/scrape: "true"
+    nodeSelector:
+      environment: infra
+    tolerations:
+      - key: environment
+        operator: Equal
+        value: infra
+        effect: PreferNoSchedule
+    dnsConfig:
+      options:
+        - name: ndots
+          value: "1"
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 128Mi

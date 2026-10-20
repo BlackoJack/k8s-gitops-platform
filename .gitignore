@@ -1,0 +1,4 @@
+.vscode/
+.idea/
+*.yaml_bak
+.syncthing*

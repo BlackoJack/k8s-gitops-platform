@@ -1,0 +1,86 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: pod
+  namespace: monitoring
+spec:
+  groups:
+    - name: pod
+      rules:
+        # Same pod UID, restart counter went up. RollingUpdate creates a new pod
+        # with restarts=0, so this is crash / OOM / liveness / kubelet — not a deploy.
+        # Use offset subtraction, not increase(): after kube-state-metrics restart
+        # increase() treats the lifetime counter as a jump from 0 and pages everyone.
+        - alert: PodContainerRestarted
+          expr: |
+            (
+              kube_pod_container_status_restarts_total
+              - kube_pod_container_status_restarts_total offset 15m
+            ) >= 1
+            * on (cluster, namespace, pod) group_left(node)
+            kube_pod_info
+            and on (cluster, namespace, pod)
+            kube_pod_status_phase{phase="Running"} == 1
+            unless on (cluster, namespace, pod)
+            kube_pod_owner{owner_kind="Job"}
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} рестартнул контейнер {{ $labels.container }}"
+            description: "{{ $value | humanize }} рестарт(ов) за 15м на {{ $labels.cluster }} (нода {{ $labels.node }}). Это тот же под, не новый ReplicaSet после rollout. Смотри reason: kubectl -n {{ $labels.namespace }} describe pod {{ $labels.pod }}"
+        - alert: PodOOMKilled
+          expr: |
+            (
+              kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+              and on (cluster, namespace, pod, container)
+              (kube_pod_container_status_restarts_total - kube_pod_container_status_restarts_total offset 15m) >= 1
+            )
+            * on (cluster, namespace, pod) group_left(node)
+            kube_pod_info
+            unless on (cluster, namespace, pod)
+            kube_pod_owner{owner_kind="Job"}
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} OOMKilled ({{ $labels.container }})"
+            description: "Контейнер убит по памяти на {{ $labels.cluster }}, нода {{ $labels.node }}. Поднимите limits или ищите утечку."
+        - alert: PodCrashLooping
+          expr: |
+            max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}[5m]) >= 1
+            * on (cluster, namespace, pod) group_left(node)
+            kube_pod_info
+            unless on (cluster, namespace, pod)
+            kube_pod_owner{owner_kind="Job"}
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} в CrashLoopBackOff"
+            description: "Контейнер {{ $labels.container }} не поднимается 3+ мин на {{ $labels.cluster }} (нода {{ $labels.node }})."
+        # Helm/force recreate looks like a new RS, so restart-counter alerts miss it.
+        # Normal rolling update keeps at least one Ready replica; this catches "all gone".
+        - alert: WorkloadZeroAvailable
+          expr: |
+            (
+              (
+                kube_deployment_spec_replicas > 0
+                and kube_deployment_status_replicas_available == 0
+                and on (cluster, namespace, deployment)
+                (time() - kube_deployment_created) > 5m
+              )
+              or
+              (
+                kube_statefulset_replicas > 0
+                and kube_statefulset_status_replicas_available == 0
+                and on (cluster, namespace, statefulset)
+                (time() - kube_statefulset_created) > 5m
+              )
+            )
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.deployment }}{{ $labels.statefulset }} без Ready-реплик на {{ $labels.cluster }}"
+            description: "spec>0, available=0 уже минуту. Обычный rollout так не делает. Возможны helm recreate, неудачный update, или все поды CrashLoop/Pending."

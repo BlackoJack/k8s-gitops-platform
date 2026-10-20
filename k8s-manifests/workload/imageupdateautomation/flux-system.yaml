@@ -1,0 +1,24 @@
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: fluxcdbot
+        email: flux@corp.example
+      messageTemplate: 'chore(images): update {{range .Changed.Changes}}{{println .NewValue}}{{end}}'
+    push:
+      branch: main
+  update:
+    path: ./k8s-manifests/workload
+    strategy: Setters

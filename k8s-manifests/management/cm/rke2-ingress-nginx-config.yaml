@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rke2-ingress-nginx-controller
+  namespace: kube-system
+data:
+  use-forwarded-headers: "true"
+  ssl-redirect: "false"
+  force-ssl-redirect: "false"

@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/kyverno.io/policyexception_v2.json
+# kube-runner jobs use ubuntu as root. werf-runner chowns PVCs in an init
+# container as uid 0 and sets apparmor unconfined on the build container.
+# Forcing Restricted/Baseline/requests on the kubernetes executor would break CI.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: gitlab-ci-restricted
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: pod-security-restricted
+      ruleNames:
+        - restricted
+        - autogen-restricted
+        - autogen-cronjob-restricted
+    - policyName: pod-security-baseline
+      ruleNames:
+        - baseline
+        - autogen-baseline
+        - autogen-cronjob-baseline
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - Deployment
+            - ReplicaSet
+            - Job
+            - CronJob
+          namespaces:
+            - gitlab-ci
+  # No podSecurity filter: container appArmorProfile=Unconfined is a
+  # container control (needs images) while the annotation is pod-level
+  # (images must be omitted). Skipping the whole PSS rules for this ns.
+---
+# Job pods have no cpu/memory by design. Historical runner ReplicaSets from
+# before manager requests were set stay at replicas=0 until revisionHistoryLimit
+# GCs them; they still fail background scans.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: gitlab-ci-requests
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: require-requests
+      ruleNames:
+        - validate-resources
+        - autogen-validate-resources
+        - autogen-cronjob-validate-resources
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - Deployment
+            - ReplicaSet
+            - Job
+            - CronJob
+          namespaces:
+            - gitlab-ci
+---
+# werf init used untagged `alpine`; CI images are whatever .gitlab-ci.yml says.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: gitlab-ci-latest-tag
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: disallow-latest-tag
+      ruleNames:
+        - require-image-tag
+        - validate-image-tag
+        - autogen-require-image-tag
+        - autogen-validate-image-tag
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - Job
+          namespaces:
+            - gitlab-ci
+          names:
+            - runner-*

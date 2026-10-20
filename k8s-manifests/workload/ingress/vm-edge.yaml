@@ -1,0 +1,39 @@
+# Same hostnames as before. Cilium uses the wildcard cert from kube-system
+# when the TLS block has no secretName.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vm-edge
+  namespace: monitoring
+  labels:
+    external-dns.corp.example/enabled: "true"
+  annotations:
+    kubernetes.io/ingress.class: cilium
+spec:
+  ingressClassName: cilium
+  tls:
+    - hosts:
+        - vmui.msk.corp.example
+        - vminsert.msk.corp.example
+        - logs.msk.corp.example
+        - vlinsert.msk.corp.example
+        - traces.msk.corp.example
+  rules:
+    - host: vmui.msk.corp.example
+      http: &edge-http
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vmauth-edge
+                port:
+                  number: 8427
+    - host: vminsert.msk.corp.example
+      http: *edge-http
+    - host: logs.msk.corp.example
+      http: *edge-http
+    - host: vlinsert.msk.corp.example
+      http: *edge-http
+    - host: traces.msk.corp.example
+      http: *edge-http

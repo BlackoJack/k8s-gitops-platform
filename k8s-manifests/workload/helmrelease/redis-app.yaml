@@ -1,0 +1,330 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: redis-app
+  namespace: redis-staging
+spec:
+  interval: 30m
+  timeout: 15m
+  dependsOn:
+    - name: redis-operator
+      namespace: redis-operator
+  chart:
+    spec:
+      chart: redis-replication
+      version: "0.17.1"
+      sourceRef:
+        kind: HelmRepository
+        name: ot-helm
+        namespace: flux-system
+      interval: 1h
+  install:
+    createNamespace: true
+  values:
+    redisReplication:
+      name: redis-app
+      clusterSize: 3
+      image: quay.io/opstree/redis
+      tag: v8.4.0
+      imagePullPolicy: IfNotPresent
+      redisSecret:
+        secretName: redis-auth
+        secretKey: password
+      resources:
+        requests:
+          cpu: 50m
+          memory: 1Gi
+        limits:
+          memory: 1Gi
+      maxMemoryPercentOfLimit: 75
+      recreateStatefulSetOnUpdateInvalid: true
+    labels:
+      environment: staging
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ha-nfs
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 4Gi
+    nodeSelector:
+      environment: staging
+    tolerations:
+      - key: "environment"
+        operator: "Equal"
+        value: "staging"
+        effect: "NoSchedule"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: redis-app
+                  role: replication
+              topologyKey: kubernetes.io/hostname
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: redis-app
+            role: replication
+    pdb:
+      enabled: true
+      minAvailable: 2
+      maxUnavailable: 1
+    # Process already uid 1000. Restricted needs container allowPE/drop/seccomp.
+    # STS will rolling-restart (PDB 2/3); sentinel may failover the master.
+    podSecurityContext: &redis-pod-sc
+      runAsUser: 1000
+      runAsGroup: 1000
+      runAsNonRoot: true
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext: &redis-container-sc
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    redisExporter:
+      enabled: true
+      image: quay.io/opstree/redis-exporter
+      tag: "v1.80.2"
+      resources:
+        requests:
+          cpu: 20m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+      securityContext: *redis-container-sc
+    sentinel:
+      enabled: true
+      image: quay.io/opstree/redis-sentinel
+      tag: v8.4.0
+      size: 3
+      downAfterMilliseconds: "8000"
+      failoverTimeout: "30000"
+      parallelSyncs: "1"
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+      podSecurityContext: *redis-pod-sc
+      securityContext: *redis-container-sc
+      nodeSelector:
+        environment: staging
+      tolerations:
+        - key: "environment"
+          operator: "Equal"
+          value: "staging"
+          effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: redis-app
+                    role: sentinel
+                topologyKey: kubernetes.io/hostname
+    externalConfig:
+      enabled: true
+      data: |
+        tcp-keepalive 300
+        timeout 0
+        databases 16
+        appendonly yes
+        appendfsync no
+        no-appendfsync-on-rewrite yes
+        auto-aof-rewrite-percentage 100
+        auto-aof-rewrite-min-size 64mb
+        aof-load-truncated yes
+        aof-use-rdb-preamble yes
+        lazyfree-lazy-eviction yes
+        lazyfree-lazy-expire yes
+        maxmemory 768mb
+        maxmemory-policy allkeys-lru
+        slowlog-log-slower-than 10000
+        slowlog-max-len 128
+        hz 10
+        dynamic-hz yes
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: redis-app
+  namespace: redis-production
+spec:
+  interval: 30m
+  timeout: 15m
+  dependsOn:
+    - name: redis-operator
+      namespace: redis-operator
+  chart:
+    spec:
+      chart: redis-replication
+      version: "0.17.1"
+      sourceRef:
+        kind: HelmRepository
+        name: ot-helm
+        namespace: flux-system
+      interval: 1h
+  install:
+    createNamespace: true
+  values:
+    redisReplication:
+      name: redis-app
+      clusterSize: 3
+      image: quay.io/opstree/redis
+      tag: v8.4.0
+      imagePullPolicy: IfNotPresent
+      redisSecret:
+        secretName: redis-auth
+        secretKey: password
+      resources:
+        requests:
+          cpu: 100m
+          memory: 6Gi
+        limits:
+          memory: 8Gi
+      # 75% of 8Gi = 6Gi. Must stay in sync with externalConfig maxmemory.
+      maxMemoryPercentOfLimit: 75
+      recreateStatefulSetOnUpdateInvalid: true
+    labels:
+      environment: production
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ha-nfs
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 8Gi
+    # 6Gi Redis does not fit infra (~6.3Gi allocatable). Production nodes are ~14Gi.
+    nodeSelector:
+      environment: production
+    tolerations:
+      - key: "environment"
+        operator: "Equal"
+        value: "production"
+        effect: "NoSchedule"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: redis-app
+                  role: replication
+              topologyKey: kubernetes.io/hostname
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: redis-app
+            role: replication
+    pdb:
+      enabled: true
+      minAvailable: 2
+      maxUnavailable: 1
+    # Process already uid 1000. Restricted needs container allowPE/drop/seccomp.
+    # STS will rolling-restart (PDB 2/3); sentinel may failover the master.
+    podSecurityContext: &redis-pod-sc
+      runAsUser: 1000
+      runAsGroup: 1000
+      runAsNonRoot: true
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext: &redis-container-sc
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    redisExporter:
+      enabled: true
+      image: quay.io/opstree/redis-exporter
+      tag: "v1.80.2"
+      resources:
+        requests:
+          cpu: 20m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+      securityContext: *redis-container-sc
+    sentinel:
+      enabled: true
+      image: quay.io/opstree/redis-sentinel
+      tag: v8.4.0
+      size: 3
+      downAfterMilliseconds: "8000"
+      failoverTimeout: "30000"
+      parallelSyncs: "1"
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+      podSecurityContext: *redis-pod-sc
+      securityContext: *redis-container-sc
+      nodeSelector:
+        environment: production
+      tolerations:
+        - key: "environment"
+          operator: "Equal"
+          value: "production"
+          effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: redis-app
+                    role: sentinel
+                topologyKey: kubernetes.io/hostname
+    externalConfig:
+      enabled: true
+      data: |
+        tcp-keepalive 300
+        timeout 0
+        databases 16
+        appendonly yes
+        appendfsync no
+        no-appendfsync-on-rewrite yes
+        auto-aof-rewrite-percentage 100
+        auto-aof-rewrite-min-size 64mb
+        aof-load-truncated yes
+        aof-use-rdb-preamble yes
+        lazyfree-lazy-eviction yes
+        lazyfree-lazy-expire yes
+        maxmemory 6gb
+        maxmemory-policy allkeys-lru
+        slowlog-log-slower-than 10000
+        slowlog-max-len 128
+        hz 10
+        dynamic-hz yes

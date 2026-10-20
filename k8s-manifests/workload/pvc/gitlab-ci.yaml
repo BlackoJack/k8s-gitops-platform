@@ -1,0 +1,65 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-ci-kubernetes-executor-werf-cache
+  namespace: gitlab-ci
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ha-nfs
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-ci-kubernetes-executor-builds-cache
+  namespace: gitlab-ci
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ha-nfs
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-ci-kubernetes-executor-helper-home
+  namespace: gitlab-ci
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ha-nfs
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-ci-kubernetes-executor-buildah-cache
+  namespace: gitlab-ci
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ha-nfs
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-ci-kubernetes-executor-cache
+  namespace: gitlab-ci
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ha-nfs
+  resources:
+    requests:
+      storage: 30Gi

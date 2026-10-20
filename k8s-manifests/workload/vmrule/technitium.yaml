@@ -1,0 +1,118 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: technitium
+  namespace: monitoring
+spec:
+  groups:
+    - name: technitium
+      rules:
+        # One replica down: CoreDNS still has the other + Yandex public fallback.
+        # Warning, not critical. node= matches PveNodeScrapeFailed inhibit.
+        - alert: TechnitiumDnsInstanceDown
+          expr: min by (cluster, instance) (probe_success{job="technitium-dns"}) == 0
+          for: 2m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Technitium {{ $labels.instance }} не отвечает на SOA"
+            description: "UDP/53 на {{ $labels.instance }} не отдаёт SOA (msk.corp.example / corp.example) уже 2м. Второй dns ещё может обслуживать кластер. Host — дашборд PVE VMs."
+            dashboard: "https://grafana.msk.corp.example/d/technitium-dns?var-instance={{ $labels.instance | urlquery }}"
+
+        # Both nameservers fail every SOA probe. CoreDNS then only has 77.88.8.8 —
+        # corp.example and internal zones disappear.
+        - alert: TechnitiumDnsOutage
+          expr: count(count by (instance) (probe_success{job="technitium-dns"} == 1)) == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Оба Technitium (dns-1/2) не отвечают"
+            description: "Ни один SOA-probe к dns-1/2 не успешен. CoreDNS forward 10.16.2.10 / 10.16.2.11 мёртв, остаётся Яндекс DNS — внутренние имена corp.example пропадут."
+            dashboard: "https://grafana.msk.corp.example/d/technitium-dns"
+
+        # Server answers other zones; this zone failed. Not a dead process.
+        - alert: TechnitiumDnsZoneFailed
+          expr: |
+            probe_success{job="technitium-dns"} == 0
+            and on (cluster, instance)
+            min by (cluster, instance) (probe_success{job="technitium-dns"}) == 1
+          for: 5m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Зона {{ $labels.zone }} не резолвится на {{ $labels.instance }}"
+            description: "SOA {{ $labels.zone }} с {{ $labels.instance }} падает 5м, остальные зоны на этой VM живы. Проверьте, что зона есть в Technitium и secondary синхронизирован."
+            dashboard: "https://grafana.msk.corp.example/d/technitium-dns?var-instance={{ $labels.instance | urlquery }}"
+
+        # :5380 is the per-node admin/metrics port. cert-manager DNS-01 uses
+        # https://dns.msk.corp.example (API :53443); writes are pinned to ns-1.
+        - alert: TechnitiumAdminDown
+          expr: probe_success{job="technitium-admin"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Technitium UI/API {{ $labels.instance }}:5380 недоступен"
+            description: "HTTP :5380 не отвечает. DNS UDP/53 может быть жив отдельно. cert-manager DNS-01 ходит на https://dns.msk.corp.example и от этого порта не зависит."
+            dashboard: "https://grafana.msk.corp.example/d/technitium-dns?var-instance={{ $labels.instance | urlquery }}"
+
+        - alert: TechnitiumHighLatency
+          expr: min by (cluster, instance) (probe_duration_seconds{job="technitium-dns"}) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Technitium {{ $labels.instance }} отвечает медленно ({{ $value | humanizeDuration }})"
+            description: "SOA probe >500ms 10м. В LAN обычно единицы мс. Смотрите CPU/IO на PVE VMs и очередь запросов."
+            dashboard: "https://grafana.msk.corp.example/d/technitium-dns?var-instance={{ $labels.instance | urlquery }}"
+
+        # Serials differ after transfer lag. 15m ignores a just-updated primary.
+        - alert: TechnitiumSoaSkew
+          expr: |
+            max by (cluster, zone) (probe_dns_serial{job="technitium-dns"})
+            - min by (cluster, zone) (probe_dns_serial{job="technitium-dns"})
+            > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SOA {{ $labels.zone }} расходится между dns-1 и dns-2"
+            description: "Серийники зоны {{ $labels.zone }} отличаются {{ $value }} уже 15м. Secondary не забирает zone transfer (TSIG / allow-transfer / сеть)."
+            dashboard: "https://grafana.msk.corp.example/d/technitium-dns"
+
+        # Lifetime counters from /api/dashboard/metrics/text. Skip when QPS is tiny
+        # so overnight idle + one SERVFAIL is not an alert.
+        - alert: TechnitiumServfailHigh
+          expr: |
+            (
+              rate(technitium_total_server_failure[15m])
+              or rate(technitium_server_failure_total[15m])
+            )
+            / clamp_min(
+              (rate(technitium_total_queries[15m]) or rate(technitium_queries_total[15m])),
+              1
+            ) > 0.05
+          for: 15m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Technitium {{ $labels.instance }}: SERVFAIL {{ $value | humanizePercentage }}"
+            description: "Доля SERVFAIL >5% за 15м при QPS≥1. Форвардеры, DNSSEC или битая зона. NXDOMAIN не считается."
+            dashboard: "https://grafana.msk.corp.example/d/technitium-dns?var-instance={{ $labels.instance | urlquery }}"
+
+        - alert: TechnitiumScrapeFailed
+          expr: up{job="technitium"} == 0
+          for: 10m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Нет scrape метрик Technitium {{ $labels.instance }}"
+            description: "up=0 для job=technitium. UI :5380 может быть жив. Проверьте token (Dashboard: View) и /api/dashboard/metrics/text."
+            dashboard: "https://grafana.msk.corp.example/d/technitium-dns?var-instance={{ $labels.instance | urlquery }}"

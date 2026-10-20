@@ -1,0 +1,31 @@
+# Manager pods (kube-runner, werf-runner) expose /metrics on port 9252.
+# CI job pods in gitlab-ci are not scraped.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: gitlab-runner
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - gitlab-ci
+  selector:
+    matchExpressions:
+      - key: release
+        operator: In
+        values:
+          - kube-runner
+          - werf-runner
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab-runner
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+        - sourceLabels: [__meta_kubernetes_pod_label_release]
+          targetLabel: runner_release

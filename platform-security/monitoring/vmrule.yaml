@@ -1,0 +1,132 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: kyverno
+  namespace: monitoring
+spec:
+  groups:
+    - name: kyverno
+      rules:
+        - alert: KyvernoAdmissionControllerDown
+          expr: |
+            min by (cluster) (
+              kube_deployment_status_replicas_available{
+                namespace="kyverno",
+                deployment="kyverno-admission-controller"
+              }
+            ) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kyverno admission-controller недоступен на {{ $labels.cluster }}"
+            description: "Webhook не обрабатывает запросы 5+ минут. Создание подов в Enforce будет падать (failurePolicy=Fail). Проверьте поды в namespace kyverno."
+        - alert: KyvernoControllerDown
+          expr: |
+            min by (cluster, deployment) (
+              kube_deployment_status_replicas_available{
+                namespace="kyverno",
+                deployment=~"kyverno-(background|cleanup|reports)-controller"
+              }
+            ) == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kyverno-контроллеры без Ready-реплик на {{ $labels.cluster }}"
+            description: "Контроллер без Ready-реплик 10+ минут. Background-скан, cleanup или отчёты не работают. Проверьте: kubectl -n kyverno get pods,deploy."
+            item: "`{{ $labels.deployment }}` — 0 Ready-реплик"
+        - alert: KyvernoMetricsAbsent
+          expr: |
+            absent(up{job="kyverno", component="admission-controller"}) == 1
+            or min by (cluster, component) (up{job="kyverno"}) == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Нет метрик Kyverno на {{ $labels.cluster }}"
+            description: "VMServiceScrape kyverno не получает /metrics. Проверьте scrape-таргеты в vmagent и поды в namespace kyverno."
+            item: "компонент `{{ $labels.component }}` не скрейпится"
+        - alert: KyvernoPolicyNotReady
+          expr: |
+            sum by (cluster, policy_name) (
+              kyverno_policy_rule_info_total{status_ready="false"}
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Политики Kyverno не Ready на {{ $labels.cluster }}"
+            description: "ClusterPolicy/Policy в status_ready=false 10+ минут — правила не применяются. Смотрите: kubectl describe clusterpolicy <name>."
+            item: "`{{ $labels.policy_name }}` — status_ready=false"
+        - alert: KyvernoPolicyReportFailing
+          expr: |
+            label_replace(
+              label_replace(
+                max by (cluster, policy, rule, category, exported_namespace, kind, name) (
+                  policy_report_result{status="fail", source="kyverno"}
+                ) > 0,
+                "namespace", "$1", "exported_namespace", "(.+)"
+              ),
+              "exported_namespace", "", "", ""
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kyverno audit: {{ $labels.policy }} — нарушения на {{ $labels.cluster }}"
+            description: >-
+              Политика {{ $labels.policy }} (категория {{ $labels.category }}) работает в режиме Audit:
+              ресурсы не блокируются, но нарушения висят 15+ минут.
+              {{ if or (eq $labels.policy "pod-security-restricted") (eq $labels.policy "pod-security-baseline") }}Чинить:
+              в securityContext контейнеров выставить runAsNonRoot=true, allowPrivilegeEscalation=false,
+              capabilities.drop=[ALL], seccompProfile.type=RuntimeDefault.{{ else if eq $labels.policy "require-probes" }}Чинить:
+              добавить контейнерам livenessProbe и readinessProbe.{{ else if eq $labels.policy "require-requests" }}Чинить:
+              задать resources.requests.cpu и resources.requests.memory.{{ else if eq $labels.policy "disallow-latest-tag" }}Чинить:
+              заменить тег :latest на конкретную версию или digest.{{ else if eq $labels.policy "disallow-default-namespace" }}Чинить:
+              перенести ресурс из namespace default в собственный namespace.{{ end }}
+              Если нарушение осознанное — PolicyException в platform-security/policies.
+              Полный отчёт: kubectl -n NAMESPACE get polr -o wide.
+            item: "`{{ $labels.kind }}/{{ $labels.name }}` · правило `{{ $labels.rule }}`"
+            dashboard: "https://kyverno.msk.corp.example"
+        - alert: KyvernoPolicyError
+          expr: |
+            label_replace(
+              label_replace(
+                sum by (cluster, policy_name, resource_namespace, rule_name) (
+                  increase(kyverno_policy_results_total{rule_result="error"}[15m])
+                ) > 0,
+                "namespace", "$1", "resource_namespace", "(.+)"
+              ),
+              "resource_namespace", "", "", ""
+            )
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Ошибки выполнения политик Kyverno на {{ $labels.cluster }}"
+            description: "Правила завершаются с rule_result=error: политика сломана либо контроллеру не хватает прав/контекста. Это не нарушение ресурса, а сбой самой политики. Смотрите логи: kubectl -n kyverno logs deploy/kyverno-background-controller."
+            item: "`{{ $labels.policy_name }}` · правило `{{ $labels.rule_name }}`"
+            dashboard: "https://kyverno.msk.corp.example"
+        - alert: KyvernoAdmissionDenied
+          expr: |
+            label_replace(
+              label_replace(
+                sum by (cluster, resource_namespace, resource_kind) (
+                  increase(kyverno_admission_requests_total{
+                    request_allowed="false",
+                    resource_kind=~"Pod|Deployment|DaemonSet|StatefulSet|Job|CronJob|ReplicaSet"
+                  }[15m])
+                ) > 0,
+                "namespace", "$1", "resource_namespace", "(.+)"
+              ),
+              "resource_namespace", "", "", ""
+            )
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kyverno отклоняет workload-ресурсы на {{ $labels.cluster }}"
+            description: "Admission-запросы с request_allowed=false за последние 15м. Политики в Audit так не делают — значит либо политика переведена в Enforce, либо сбой webhook. Деплой в этих namespace сейчас не проходит."
+            item: "`{{ $labels.resource_kind }}` — запросы отклонены"
+            dashboard: "https://kyverno.msk.corp.example"

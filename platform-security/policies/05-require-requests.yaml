@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/kyverno.io/clusterpolicy_v1.json
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-requests
+  annotations:
+    policies.kyverno.io/title: Require Resource Requests
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+spec:
+  background: true
+  rules:
+    - name: validate-resources
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - kyverno
+                - flux-system
+                - cattle-system
+                - cattle-fleet-system
+                - cattle-impersonation-system
+                - cattle-monitoring-system
+      validate:
+        failureAction: Audit
+        message: CPU and memory requests are required.
+        pattern:
+          spec:
+            =(ephemeralContainers):
+              - resources:
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
+            =(initContainers):
+              - resources:
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
+            containers:
+              - resources:
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"

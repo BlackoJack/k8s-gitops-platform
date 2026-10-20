@@ -1,0 +1,48 @@
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-ingress-nginx
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    controller:
+      kind: Deployment
+      hostNetwork: false
+      hostPort:
+        enabled: false
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 3
+        targetCPUUtilizationPercentage: 80
+        targetMemoryUtilizationPercentage: ""
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+      ingressClassResource:
+        name: nginx
+        enabled: true
+        default: false
+        controllerValue: "k8s.io/ingress-nginx"
+      extraArgs:
+        default-ssl-certificate: "default/msk-corp-wildcard"
+      config:
+        allow-snippet-annotations: "true"
+        use-forwarded-headers: "true"
+        enable-metrics: "true"
+      metrics:
+        enabled: true
+        serviceMonitor:
+          enabled: false
+      service:
+        enabled: true
+        type: LoadBalancer
+        externalTrafficPolicy: Cluster
+        labels:
+          io.cilium/lb-managed: "true"
+        annotations:
+          lbipam.cilium.io/ips: "10.16.0.181"

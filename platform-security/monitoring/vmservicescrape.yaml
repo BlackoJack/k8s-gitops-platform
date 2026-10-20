@@ -1,0 +1,48 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: kyverno
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - kyverno
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: kyverno
+      app.kubernetes.io/part-of: kyverno
+  endpoints:
+    - port: metrics-port
+      path: /metrics
+      interval: 30s
+      honorLabels: true
+      relabelConfigs:
+        - targetLabel: job
+          replacement: kyverno
+        - sourceLabels: [__meta_kubernetes_service_label_app_kubernetes_io_component]
+          targetLabel: component
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: policy-reporter
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - kyverno
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: policy-reporter
+      app.kubernetes.io/component: reporting
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: policy-reporter
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod

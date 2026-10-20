@@ -1,0 +1,130 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rke2-traefik-crd
+  namespace: kube-system
+spec:
+  interval: 30m
+  timeout: 10m
+  releaseName: rke2-traefik-crd
+  maxHistory: 5
+  chart:
+    spec:
+      chart: rke2-traefik-crd
+      version: "40.1.010"
+      interval: 1h
+      sourceRef:
+        kind: HelmRepository
+        name: rke2-charts
+        namespace: flux-system
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rke2-traefik
+  namespace: kube-system
+spec:
+  interval: 30m
+  timeout: 15m
+  releaseName: rke2-traefik
+  maxHistory: 5
+  dependsOn:
+    - name: rke2-traefik-crd
+      namespace: kube-system
+  chart:
+    spec:
+      chart: rke2-traefik
+      version: "40.1.010"
+      interval: 1h
+      sourceRef:
+        kind: HelmRepository
+        name: rke2-charts
+        namespace: flux-system
+  install:
+    crds: Skip
+    remediation:
+      retries: 5
+  upgrade:
+    crds: Skip
+    remediation:
+      retries: 3
+  values:
+    global:
+      clusterCIDR: 10.42.0.0/16
+      clusterCIDRv4: 10.42.0.0/16
+      clusterDNS: 10.43.0.10
+      clusterDomain: cluster.local
+      serviceCIDR: 10.43.0.0/16
+    deployment:
+      kind: Deployment
+      replicas: null
+      minReadySeconds: 10
+    updateStrategy:
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 1
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: rke2-traefik
+    nodeSelector:
+      environment: ingress
+    tolerations:
+      - key: environment
+        operator: Equal
+        value: ingress
+        effect: NoSchedule
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 4
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+    ports:
+      web:
+        port: 8000
+        expose:
+          default: true
+        exposedPort: 80
+        hostPort: null
+      websecure:
+        port: 8443
+        expose:
+          default: true
+        exposedPort: 443
+        hostPort: null
+        tls:
+          enabled: true
+    tlsStore:
+      default:
+        defaultCertificate:
+          secretName: msk-corp-wildcard
+    ingressClass:
+      enabled: true
+      isDefaultClass: false
+    service:
+      enabled: true
+      spec:
+        type: LoadBalancer
+      labels:
+        io.cilium/lb-managed: "true"
+      annotations:
+        lbipam.cilium.io/ips: "10.16.0.201"

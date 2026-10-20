@@ -1,0 +1,16 @@
+# Root API VIP lives on the management cluster (10.16.0.183). external-dns runs
+# only on the workload cluster and owns msk.corp.example, so the A record is published here.
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: k8s-management-api
+  namespace: external-dns
+  labels:
+    external-dns.corp.example/enabled: "true"
+spec:
+  endpoints:
+    - dnsName: k8s-management.msk.corp.example
+      recordTTL: 60
+      recordType: A
+      targets:
+        - "10.16.0.183"

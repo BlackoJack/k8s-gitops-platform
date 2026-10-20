@@ -1,0 +1,75 @@
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: vlagent
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: pod-security-baseline
+      ruleNames:
+        - baseline
+        - autogen-baseline
+        - autogen-cronjob-baseline
+    - policyName: pod-security-restricted
+      ruleNames:
+        - restricted
+        - autogen-restricted
+        - autogen-cronjob-restricted
+  match:
+    any:
+      - resources:
+          kinds:
+            - DaemonSet
+            - Pod
+          namespaces:
+            - monitoring
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: vlagent
+  podSecurity:
+    - controlName: HostPath Volumes
+    - controlName: Volume Types
+    - controlName: Running as Non-root
+      images:
+        - "*"
+    - controlName: Running as Non-root user
+      images:
+        - "*"
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: node-exporter
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: pod-security-baseline
+      ruleNames:
+        - baseline
+        - autogen-baseline
+        - autogen-cronjob-baseline
+    - policyName: pod-security-restricted
+      ruleNames:
+        - restricted
+        - autogen-restricted
+        - autogen-cronjob-restricted
+  match:
+    any:
+      - resources:
+          kinds:
+            - DaemonSet
+            - Pod
+          namespaces:
+            - monitoring
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus-node-exporter
+  podSecurity:
+    - controlName: HostPath Volumes
+    - controlName: Host Namespaces
+    - controlName: Volume Types
+    - controlName: Host Ports
+      images:
+        - "*"

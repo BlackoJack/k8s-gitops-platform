@@ -1,0 +1,25 @@
+# Angie prometheus_all on both NSK balancers. Same config, separate runtime:
+# peer state is per process, so both targets stay in this job.
+# Series appear only for upstreams with `zone` and servers with status_zone.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: angie
+  namespace: monitoring
+spec:
+  jobName: angie
+  targetEndpoints:
+    - targets:
+        - balancer-1.corp.example
+        - balancer-2.corp.example
+      scheme: http
+      path: /p8s
+      interval: 30s
+      scrapeTimeout: 15s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: angie
+        - sourceLabels: [__address__]
+          regex: ^([^.]+).*
+          targetLabel: instance
+          replacement: $1

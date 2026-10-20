@@ -1,0 +1,137 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: leading
+  namespace: monitoring
+spec:
+  groups:
+    - name: leading
+      rules:
+        # Leading indicators, not ML/z-score. Statistical anomaly (stddev,
+        # vmanomaly) is noisy on bursty k8s metrics. These fire only when
+        # something is already bad AND still getting worse, or when kubelet
+        # itself says the node is under pressure.
+        # Disk predict_linear lives in defaultRules (NodeFilesystemSpaceFillingUp)
+        # and vmrule/storage.yaml (PVC). Certs: CertManagerCertExpiringSoon.
+        - alert: NodePressure
+          expr: |
+            kube_node_status_condition{
+              condition=~"MemoryPressure|DiskPressure|PIDPressure",
+              status="true"
+            } == 1
+            and on (cluster, node)
+            kube_node_spec_unschedulable == 0
+          for: 5m
+          labels:
+            severity: warning
+            alertgroup: leading
+          annotations:
+            summary: "Нода {{ $labels.node }}: {{ $labels.condition }} на {{ $labels.cluster }}"
+            description: "Kubelet уже 5+ мин в {{ $labels.condition }}. Дальше eviction подов, потом NotReady. Не scale-up (не cordon). Смотри `kubectl describe node {{ $labels.node }}`."
+
+        # kube-prometheus NodeMemoryHighUtilization is a static ~90%. This one
+        # is earlier on a runaway (already <20% free AND emptying in 30m) and
+        # quiet if the node just sits high with a flat line.
+        - alert: NodeMemoryFillingUp
+          expr: |
+            (
+              (
+                node_memory_MemAvailable_bytes
+                / node_memory_MemTotal_bytes
+              ) < 0.20
+              and
+              predict_linear(node_memory_MemAvailable_bytes[1h], 30 * 60) < 0
+            )
+          for: 20m
+          labels:
+            severity: warning
+            alertgroup: leading
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Нода {{ $labels.instance }}: память кончается на {{ $labels.cluster }}"
+            description: "Свободно {{ $value | humanizePercentage }}, по тренду часа MemAvailable уйдёт в 0 за ~30м. Дальше MemoryPressure и eviction. Не путать со стабильно высокой утилизацией — там predict_linear не срабатывает."
+
+        # Precursor to PodOOMKilled. Stable high usage (JVM at 95%) has slope~0
+        # and does not fire. Jobs and gitlab-ci spike by design.
+        - alert: ContainerMemoryFillingUp
+          expr: |
+            (
+              (
+                container_memory_working_set_bytes{
+                  job="kubelet",
+                  metrics_path="/metrics/cadvisor",
+                  container!="",
+                  container!="POD",
+                  namespace!="gitlab-ci"
+                }
+                /
+                container_spec_memory_limit_bytes{
+                  job="kubelet",
+                  metrics_path="/metrics/cadvisor",
+                  container!="",
+                  container!="POD",
+                  namespace!="gitlab-ci"
+                }
+              ) > 0.92
+              and
+              container_spec_memory_limit_bytes{
+                job="kubelet",
+                metrics_path="/metrics/cadvisor",
+                container!="",
+                container!="POD",
+                namespace!="gitlab-ci"
+              } > 0
+              and
+              container_spec_memory_limit_bytes{
+                job="kubelet",
+                metrics_path="/metrics/cadvisor",
+                container!="",
+                container!="POD",
+                namespace!="gitlab-ci"
+              } < 1e15
+              and
+              predict_linear(
+                container_memory_working_set_bytes{
+                  job="kubelet",
+                  metrics_path="/metrics/cadvisor",
+                  container!="",
+                  container!="POD",
+                  namespace!="gitlab-ci"
+                }[1h],
+                30 * 60
+              )
+              >
+              container_spec_memory_limit_bytes{
+                job="kubelet",
+                metrics_path="/metrics/cadvisor",
+                container!="",
+                container!="POD",
+                namespace!="gitlab-ci"
+              }
+            )
+            * on (cluster, namespace, pod) group_left(node)
+            kube_pod_info
+            unless on (cluster, namespace, pod)
+            kube_pod_owner{owner_kind="Job"}
+          for: 20m
+          labels:
+            severity: warning
+            alertgroup: leading
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} близок к OOM ({{ $labels.container }})"
+            description: "working_set {{ $value | humanizePercentage }} limit и по тренду часа упрётся в limit за ~30м на {{ $labels.cluster }} (нода {{ $labels.node }}). Стабильно высокий RSS без роста не алертит. Поднимите limit или ищите утечку — иначе будет PodOOMKilled."
+
+        # Precursor to WorkloadZeroAvailable / pending replicas. gitlab-ci
+        # already has GitLabCIJobPodPending. Image-pull Pending is not this metric.
+        - alert: PodUnschedulable
+          expr: |
+            kube_pod_status_unschedulable{namespace!="gitlab-ci"} == 1
+            unless on (cluster, namespace, pod)
+            kube_pod_owner{owner_kind="Job"}
+          for: 15m
+          labels:
+            severity: warning
+            alertgroup: leading
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} не планируется 15м"
+            description: "Unschedulable на {{ $labels.cluster }}. Обычно нет CPU/RAM/диска на нодах, taint, или affinity. `kubectl -n {{ $labels.namespace }} describe pod {{ $labels.pod }}`."

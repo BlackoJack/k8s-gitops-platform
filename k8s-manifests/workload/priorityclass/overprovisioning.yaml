@@ -1,0 +1,11 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: overprovisioning
+value: -10
+globalDefault: false
+preemptionPolicy: Never
+description: >
+  Spare memory requests on infra nodes. A normal pod preempts this one;
+  the placeholder goes Pending and cluster-autoscaler adds a worker-infra
+  node. Never preempts anyone else.

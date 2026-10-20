@@ -1,0 +1,27 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager-technitium-webhook
+  namespace: cert-manager
+spec:
+  chart:
+    spec:
+      chart: cert-manager-technitium-webhook
+      reconcileStrategy: ChartVersion
+      sourceRef:
+        kind: HelmRepository
+        name: cert-manager-technitium-webhook
+        namespace: flux-system
+  interval: 3m0s
+  values:
+    groupName: acme.technitium.corp
+    certManager:
+      namespace: cert-manager
+      serviceAccountName: cert-manager-cert-manager
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi

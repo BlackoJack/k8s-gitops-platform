@@ -1,0 +1,324 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-technitium
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: DNS
+data:
+  technitium.json: |
+    {
+      "uid": "technitium-dns",
+      "title": "Technitium DNS",
+      "description": "dns-1/2: SOA probes (msk.corp.example, corp.example) + native metrics :5380. Хост — дашборд PVE VMs.",
+      "tags": ["platform", "dns", "technitium"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "editable": true,
+      "graphTooltip": 1,
+      "fiscalYearStartMonth": 0,
+      "time": { "from": "now-6h", "to": "now" },
+      "links": [
+        {
+          "title": "PVE VMs",
+          "type": "link",
+          "icon": "dashboard",
+          "keepTime": true,
+          "url": "/d/pve-node?var-instance=dns-1&var-instance=dns-2&${__url_time_range}"
+        }
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": { "text": "VictoriaMetrics Prometheus", "value": "VictoriaMetricsProm" },
+            "hide": 0
+          },
+          {
+            "name": "instance",
+            "label": "Server",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(probe_success{job=\"technitium-dns\"}, instance)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Overview",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "DNS",
+          "description": "min(SOA probe) по выбранным серверам.",
+          "gridPos": { "h": 4, "w": 3, "x": 0, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min(last_over_time(probe_success{job=\"technitium-dns\",instance=~\"$instance\"}[2m]))" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "OK", "color": "green" } } }],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Admin :5380",
+          "gridPos": { "h": 4, "w": 3, "x": 3, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min(last_over_time(probe_success{job=\"technitium-admin\",instance=~\"$instance\"}[2m]))" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "OK", "color": "green" } } }],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "QPS",
+          "gridPos": { "h": 4, "w": 3, "x": 6, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(rate(technitium_total_queries{instance=~\"$instance\"}[5m]) or rate(technitium_queries_total{instance=~\"$instance\"}[5m]))" }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "qps",
+              "decimals": 1,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Cache hit",
+          "gridPos": { "h": 4, "w": 3, "x": 9, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(rate(technitium_total_cached{instance=~\"$instance\"}[5m]) or rate(technitium_cached_total{instance=~\"$instance\"}[5m])) / clamp_min(sum(rate(technitium_total_queries{instance=~\"$instance\"}[5m]) or rate(technitium_queries_total{instance=~\"$instance\"}[5m])), 1e-9)" }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 0,
+              "min": 0,
+              "max": 1,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }, { "color": "green", "value": 0.4 }] }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "SERVFAIL",
+          "gridPos": { "h": 4, "w": 3, "x": 12, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(rate(technitium_total_server_failure{instance=~\"$instance\"}[5m]) or rate(technitium_server_failure_total{instance=~\"$instance\"}[5m])) / clamp_min(sum(rate(technitium_total_queries{instance=~\"$instance\"}[5m]) or rate(technitium_queries_total{instance=~\"$instance\"}[5m])), 1e-9)" }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 2,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.01 }, { "color": "red", "value": 0.05 }] }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "SOA latency",
+          "gridPos": { "h": 4, "w": 3, "x": 15, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "max(probe_duration_seconds{job=\"technitium-dns\",instance=~\"$instance\"})" }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "decimals": 3,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.05 }, { "color": "red", "value": 0.5 }] }
+            }
+          }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Firing",
+          "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(ALERTS{alertname=~\"Technitium.+\",alertstate=\"firing\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Blocked",
+          "description": "QPS в блоклистах Technitium. Не алерт — ожидаемо, если списки включены.",
+          "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum(rate(technitium_total_blocked{instance=~\"$instance\"}[5m]) or rate(technitium_blocked_total{instance=~\"$instance\"}[5m]))" }],
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "qps",
+              "decimals": 1,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] }
+            }
+          }
+        },
+        {
+          "id": 10,
+          "type": "table",
+          "title": "Servers",
+          "description": "Клик по VM — хост на PVE VMs.",
+          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 5 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "format": "table",
+            "instant": true,
+            "expr": "label_replace(min by (instance) (probe_success{job=\"technitium-dns\",instance=~\"$instance\"}), \"col\", \"DNS\", \"__name__\", \".*\") or label_replace(probe_success{job=\"technitium-admin\",instance=~\"$instance\"}, \"col\", \"Admin\", \"__name__\", \".*\") or label_replace(up{job=\"technitium\",instance=~\"$instance\"}, \"col\", \"Metrics\", \"__name__\", \".*\") or label_replace(rate(technitium_total_queries{instance=~\"$instance\"}[5m]) or rate(technitium_queries_total{instance=~\"$instance\"}[5m]), \"col\", \"QPS\", \"__name__\", \".*\") or label_replace(technitium_uptime_seconds{instance=~\"$instance\"}, \"col\", \"Uptime\", \"__name__\", \".*\")"
+          }],
+          "options": { "showHeader": true, "cellHeight": "sm" },
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "filterable": true, "align": "center" },
+              "links": [{ "title": "PVE VMs", "url": "/d/pve-node?var-instance=${__data.fields.VM}&${__url_time_range}" }]
+            },
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "VM" }, "properties": [{ "id": "custom.align", "value": "left" }, { "id": "custom.width", "value": 160 }] },
+              {
+                "matcher": { "id": "byName", "options": "DNS" },
+                "properties": [
+                  { "id": "custom.width", "value": 90 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "OK", "color": "green" } } }] }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Admin" },
+                "properties": [
+                  { "id": "custom.width", "value": 90 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "OK", "color": "green" } } }] }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Metrics" },
+                "properties": [
+                  { "id": "custom.width", "value": 90 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "OK", "color": "green" } } }] }
+                ]
+              },
+              { "matcher": { "id": "byName", "options": "QPS" }, "properties": [{ "id": "unit", "value": "qps" }, { "id": "decimals", "value": 1 }, { "id": "custom.width", "value": 100 }] },
+              { "matcher": { "id": "byName", "options": "Uptime" }, "properties": [{ "id": "unit", "value": "s" }, { "id": "custom.width", "value": 120 }] }
+            ]
+          },
+          "transformations": [
+            { "id": "filterFieldsByName", "options": { "include": { "pattern": "/^(instance|col|Value)$/" } } },
+            { "id": "groupingToMatrix", "options": { "columnField": "col", "rowField": "instance", "valueField": "Value" } },
+            { "id": "organize", "options": { "excludeByName": { "Time": true }, "indexByName": { "instance": 0, "DNS": 1, "Admin": 2, "Metrics": 3, "QPS": 4, "Uptime": 5 }, "renameByName": { "instance": "VM" } } }
+          ]
+        },
+        {
+          "id": 11,
+          "type": "row",
+          "title": "Queries",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 }
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "QPS by path",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "sum by (instance) (rate(technitium_total_authoritative{instance=~\"$instance\"}[5m]) or rate(technitium_authoritative_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}} auth" },
+            { "refId": "B", "expr": "sum by (instance) (rate(technitium_total_recursive{instance=~\"$instance\"}[5m]) or rate(technitium_recursive_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}} recursive" },
+            { "refId": "C", "expr": "sum by (instance) (rate(technitium_total_cached{instance=~\"$instance\"}[5m]) or rate(technitium_cached_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}} cached" },
+            { "refId": "D", "expr": "sum by (instance) (rate(technitium_total_blocked{instance=~\"$instance\"}[5m]) or rate(technitium_blocked_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}} blocked" },
+            { "refId": "E", "expr": "sum by (instance) (rate(technitium_total_dropped{instance=~\"$instance\"}[5m]) or rate(technitium_dropped_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}} dropped" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "qps", "custom": { "fillOpacity": 15, "lineWidth": 1 } } }
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "Rcode",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "sum by (instance) (rate(technitium_total_no_error{instance=~\"$instance\"}[5m]) or rate(technitium_no_error_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}} NOERROR" },
+            { "refId": "B", "expr": "sum by (instance) (rate(technitium_total_nx_domain{instance=~\"$instance\"}[5m]) or rate(technitium_nx_domain_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}} NXDOMAIN" },
+            { "refId": "C", "expr": "sum by (instance) (rate(technitium_total_server_failure{instance=~\"$instance\"}[5m]) or rate(technitium_server_failure_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}} SERVFAIL" },
+            { "refId": "D", "expr": "sum by (instance) (rate(technitium_total_refused{instance=~\"$instance\"}[5m]) or rate(technitium_refused_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}} REFUSED" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "qps", "custom": { "fillOpacity": 15, "lineWidth": 1 } } }
+        },
+        {
+          "id": 14,
+          "type": "row",
+          "title": "Probes",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 }
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "SOA success",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 21 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "probe_success{job=\"technitium-dns\",instance=~\"$instance\"}", "legendFormat": "{{instance}} {{zone}}" }],
+          "fieldConfig": { "defaults": { "min": 0, "max": 1, "decimals": 0, "custom": { "fillOpacity": 20, "lineWidth": 1 } } }
+        },
+        {
+          "id": 16,
+          "type": "timeseries",
+          "title": "SOA latency",
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 21 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "probe_duration_seconds{job=\"technitium-dns\",instance=~\"$instance\"}", "legendFormat": "{{instance}} {{zone}}" }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "fillOpacity": 10, "lineWidth": 1 },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.05 }, { "color": "red", "value": 0.5 }] }
+            }
+          }
+        },
+        {
+          "id": 17,
+          "type": "timeseries",
+          "title": "SOA serial",
+          "description": "Расхождение линий на 15м — алерт TechnitiumSoaSkew (secondary не забирает зону).",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 21 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "probe_dns_serial{job=\"technitium-dns\",instance=~\"$instance\"}", "legendFormat": "{{instance}} {{zone}}" }],
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 0, "lineWidth": 2 } } }
+        }
+      ]
+    }

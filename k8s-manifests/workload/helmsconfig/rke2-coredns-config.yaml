@@ -1,0 +1,54 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-coredns
+  namespace: kube-system
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  valuesContent: |-
+    nodelocal:
+      enabled: true
+    autoscaler:
+      enabled: true
+    servers:
+    - zones:
+      - zone: .
+      port: 53
+      plugins:
+      - name: errors
+      - name: health
+        configBlock: |-
+          lameduck 10s
+      - name: ready
+      # kubelet sets ndots:5, so names with <5 dots (gitlab.corp.example) are
+      # queried as name.ns.svc.cluster.local / name.svc.cluster.local /
+      # name.cluster.local before the real FQDN. Strip those suffixes.
+      # Do not name a namespace after a public TLD (com, ru, legal, …)
+      # or svc.ns.svc.cluster.local would be rewritten too.
+      - name: rewrite
+        parameters: stop
+        configBlock: |-
+          name regex "^((?:[a-z0-9-]+\.)+(?:legal|ru|com|net|org|io|dev|app|cloud|info|pro|su|xyz|me|ai|gg|tv|cc|sh|to|biz|edu))\.((?:[a-z0-9-]+\.)?svc\.)?cluster\.local\.$" "{1}." answer auto
+      - name: kubernetes
+        parameters: cluster.local in-addr.arpa ip6.arpa
+        configBlock: |-
+          pods insecure
+          fallthrough in-addr.arpa ip6.arpa
+          ttl 60
+      - name: prometheus
+        parameters: 0.0.0.0:9153
+      - name: forward
+        parameters: . 10.16.2.10 10.16.2.11 77.88.8.8 77.88.8.1
+        configBlock: |-
+          policy sequential
+          max_fails 3
+          health_check 10s
+          expire 30s
+      - name: cache
+        parameters: 300
+        configBlock: |-
+          prefetch 10 1m 10%
+      - name: loop
+      - name: reload
+      - name: loadbalance

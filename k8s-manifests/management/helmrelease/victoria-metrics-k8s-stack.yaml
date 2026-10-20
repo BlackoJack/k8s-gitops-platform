@@ -1,0 +1,177 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: victoria-metrics-k8s-stack
+  namespace: monitoring
+spec:
+  interval: 10m
+  timeout: 20m
+  releaseName: vmks
+  chart:
+    spec:
+      chart: victoria-metrics-k8s-stack
+      version: ">=0.85.0"
+      interval: 1h
+      sourceRef:
+        kind: HelmRepository
+        name: victoriametrics
+        namespace: monitoring
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 5
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+
+  values:
+    fullnameOverride: vmks
+    tenant: "0"
+
+    global:
+      clusterLabel: cluster
+
+    victoria-metrics-operator:
+      enabled: true
+      crds:
+        plain: true
+      admissionWebhooks:
+        policy: Ignore
+      operator:
+        disable_prometheus_converter: false
+
+    defaultDashboards:
+      enabled: false
+
+    syncJob:
+      enabled: false
+
+    defaultRules:
+      enabled: false
+
+    grafana:
+      enabled: false
+      sidecar:
+        dashboards:
+          multicluster: true
+
+    vmalert:
+      enabled: false
+
+    alertmanager:
+      enabled: false
+
+    vmsingle:
+      enabled: false
+
+    vmcluster:
+      enabled: false
+
+    vlcluster:
+      enabled: false
+
+    vlsingle:
+      enabled: false
+
+    vtcluster:
+      enabled: false
+
+    vtsingle:
+      enabled: false
+
+    external:
+      vm:
+        write:
+          url: https://vminsert.msk.corp.example/insert/0/prometheus/api/v1/write
+          bearerTokenSecret:
+            name: vm-edge-auth
+            key: metrics-writer-token
+      vl:
+        write:
+          url: https://vlinsert.msk.corp.example/insert/native
+          bearerTokenSecret:
+            name: vm-edge-auth
+            key: logs-writer-token
+
+    vmagent:
+      enabled: true
+      rbac:
+        namespaced: false
+      spec:
+        replicaCount: 1
+        selectAllByDefault: true
+        scrapeInterval: 20s
+        statefulMode: true
+        statefulStorage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: ha-nfs
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 10Gi
+        externalLabels:
+          cluster: management
+        extraArgs:
+          promscrape.streamParse: "true"
+          # k8s 1.36 apiserver /metrics is 10–18MiB per instance and exceeds the 16MiB default
+          promscrape.maxScrapeSize: "64MB"
+          promscrape.suppressScrapeErrorsDelay: "5m"
+          loggerMaxArgLen: "256"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+
+    vlagent:
+      enabled: false
+
+    kubeProxy:
+      enabled: false
+    kubeControllerManager:
+      enabled: false
+    kubeScheduler:
+      enabled: false
+    kubeEtcd:
+      enabled: false
+    kubeApiServer:
+      enabled: true
+    kubelet:
+      enabled: true
+      vmScrape:
+        spec:
+          relabelConfigs:
+            - action: labelmap
+              regex: __meta_kubernetes_node_label_(.+)
+            - sourceLabels: [__metrics_path__]
+              targetLabel: metrics_path
+            - targetLabel: job
+              replacement: kubelet
+            - sourceLabels: [__meta_kubernetes_node_name]
+              targetLabel: instance
+    coreDns:
+      enabled: true
+
+    prometheus-node-exporter:
+      enabled: true
+      tolerations:
+        - operator: Exists
+      vmScrape:
+        spec:
+          endpoints:
+            - port: metrics
+              relabelConfigs:
+                - sourceLabels: [__meta_kubernetes_pod_node_name]
+                  targetLabel: instance
+              metricRelabelConfigs:
+                - action: drop
+                  sourceLabels: [mountpoint]
+                  regex: "/var/lib/kubelet/pods.+"
+
+    kube-state-metrics:
+      enabled: true

@@ -1,0 +1,1232 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-alerts
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  alerts.json: |
+    {
+      "uid": "alerts",
+      "title": "Алерты",
+      "description": "Что горит сейчас и что горело за выбранный интервал. Источник — метрика ALERTS из vmalert (история на глубину retention VM, сейчас 30 дней). Watchdog скрыт.",
+      "tags": [
+        "platform",
+        "alerts"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "editable": true,
+      "graphTooltip": 1,
+      "fiscalYearStartMonth": 0,
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "dashboard",
+          "keepTime": true,
+          "includeVars": true,
+          "targetBlank": false,
+          "title": "Обзор",
+          "type": "link",
+          "url": "/d/overview"
+        },
+        {
+          "asDropdown": false,
+          "icon": "bolt",
+          "targetBlank": false,
+          "title": "Grafana Alerting",
+          "type": "link",
+          "url": "/alerting/groups?alertmanager=Alertmanager"
+        },
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "targetBlank": true,
+          "title": "Alertmanager",
+          "type": "link",
+          "url": "https://alertmanager.msk.corp.example"
+        },
+        {
+          "asDropdown": true,
+          "icon": "dashboard",
+          "keepTime": true,
+          "includeVars": true,
+          "tags": [
+            "platform"
+          ],
+          "targetBlank": false,
+          "title": "Дашборды",
+          "type": "dashboards"
+        }
+      ],
+      "time": {
+        "from": "now-7d",
+        "to": "now"
+      },
+      "timepicker": {
+        "refresh_intervals": [
+          "30s",
+          "1m",
+          "5m"
+        ]
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Источник",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "text": "VictoriaMetrics Prometheus",
+              "value": "VictoriaMetricsProm"
+            },
+            "hide": 0,
+            "skipUrlSync": true
+          },
+          {
+            "name": "cluster",
+            "label": "Кластер",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "query": "label_values(ALERTS{alertname!=\"Watchdog\"}, cluster)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            }
+          },
+          {
+            "name": "severity",
+            "label": "Severity",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "query": "label_values(ALERTS{alertname!=\"Watchdog\",cluster=~\"$cluster\"}, severity)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": {
+              "text": [
+                "warning",
+                "error",
+                "critical"
+              ],
+              "value": [
+                "warning",
+                "error",
+                "critical"
+              ]
+            }
+          },
+          {
+            "name": "alertname",
+            "label": "Алерт",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "query": "label_values(ALERTS{alertname!=\"Watchdog\",cluster=~\"$cluster\",severity=~\"$severity\"}, alertname)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "",
+          "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "transparent": true,
+          "options": {
+            "mode": "markdown",
+            "content": "**Сейчас** — что горит в этот момент (длительность с `ALERTS_FOR_STATE`). **История** — список всего, что было firing за выбранный интервал: и текущее, и уже отошедшее. **Таймлайн** — когда именно горело.\n\nФильтры справа: кластер, severity, имя. Интервал сверху — глубина (в VM до 30 дней). Watchdog скрыт. Клик по имени — горящие группы в Grafana."
+          }
+        },
+        {
+          "id": 2,
+          "type": "row",
+          "title": "Сейчас",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 3
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Горит",
+          "description": "Сколько firing-алертов прямо сейчас (после фильтров).",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}) or vector(0)",
+              "legendFormat": "горит"
+            }
+          ],
+          "links": [
+            {
+              "title": "Grafana Alerting",
+              "url": "/alerting/groups?alertmanager=Alertmanager",
+              "targetBlank": false
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "critical",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 4,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=\"critical\",alertname=~\"$alertname\",cluster=~\"$cluster\"}) or vector(0)",
+              "legendFormat": "critical"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "dark-red",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "error",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 8,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=\"error\",alertname=~\"$alertname\",cluster=~\"$cluster\"}) or vector(0)",
+              "legendFormat": "error"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "warning",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 12,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=\"warning\",alertname=~\"$alertname\",cluster=~\"$cluster\"}) or vector(0)",
+              "legendFormat": "warning"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Затихло",
+          "description": "Сколько уникальных алертов горели в выбранном интервале, но сейчас уже не firing.",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 16,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(max_over_time(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}[$__range]) unless ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}) or vector(0)",
+              "legendFormat": "затихло"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Всего за период",
+          "description": "Уникальные комбинации лейблов, которые хотя бы раз были firing в выбранном интервале (включая те, что ещё горят).",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 20,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(max_over_time(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}[$__range])) or vector(0)",
+              "legendFormat": "за период"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "value",
+            "wideLayout": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "purple",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 9,
+          "type": "row",
+          "title": "Горит сейчас",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 8
+          }
+        },
+        {
+          "id": 10,
+          "type": "table",
+          "title": "Горящие",
+          "description": "Текущие firing. Значение — сколько уже горит (time − ALERTS_FOR_STATE). Пусто = спокойно. Колонки фильтруются. Клик по имени — группы в Grafana.",
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 9
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "instant": true,
+              "expr": "(time() - ALERTS_FOR_STATE{alertname!=\"Watchdog\",alertname=~\"$alertname\",cluster=~\"$cluster\"}) and ignoring(alertstate) ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "countRows": true,
+              "reducer": [
+                "count"
+              ]
+            },
+            "sortBy": [
+              {
+                "displayName": "severity",
+                "desc": true
+              }
+            ]
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true,
+                "align": "left"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "severity"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "info": {
+                            "color": "blue",
+                            "text": "info"
+                          },
+                          "warning": {
+                            "color": "orange",
+                            "text": "warning"
+                          },
+                          "error": {
+                            "color": "red",
+                            "text": "error"
+                          },
+                          "critical": {
+                            "color": "dark-red",
+                            "text": "critical"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "алерт"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 280
+                  },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "В Grafana Alerting",
+                        "url": "/alerting/groups?alertmanager=Alertmanager&queryString=alertname%3D${__data.fields.алерт:percentencode}",
+                        "targetBlank": false
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "горит"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "dtdurations"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "yellow",
+                          "value": null
+                        },
+                        {
+                          "color": "orange",
+                          "value": 900
+                        },
+                        {
+                          "color": "red",
+                          "value": 3600
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "filterFieldsByName",
+              "options": {
+                "include": {
+                  "pattern": "/^(severity|alertname|cluster|namespace|node|pod|instance|Value.*)$/"
+                }
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "renameByName": {
+                  "Value": "горит",
+                  "alertname": "алерт",
+                  "cluster": "кластер"
+                },
+                "indexByName": {
+                  "severity": 0,
+                  "алерт": 1,
+                  "кластер": 2,
+                  "namespace": 3,
+                  "node": 4,
+                  "pod": 5,
+                  "instance": 6,
+                  "горит": 7
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "type": "row",
+          "title": "История",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 19
+          }
+        },
+        {
+          "id": 12,
+          "type": "table",
+          "title": "Что было и что есть",
+          "description": "Алерты, которые были firing в выбранном окне. «начало» — первый сэмпл, «конец» — последний; если ещё горит — «конец» пустой. Одна timeseries (та же нода, повторный fire) остаётся одной строкой: Prometheus не хранит отдельные инциденты.",
+          "gridPos": {
+            "h": 14,
+            "w": 24,
+            "x": 0,
+            "y": 20
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "from",
+              "format": "table",
+              "instant": true,
+              "expr": "label_replace(\n  min by (alertname, severity, cluster, namespace, node, pod, instance) (\n    tfirst_over_time(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}[$__range])\n  ) * 1000\n  and\n  min by (alertname, severity, cluster, namespace, node, pod, instance) (\n    ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}\n  ),\n  \"status\", \"горит\", \"\", \"\"\n)\nor\nlabel_replace(\n  min by (alertname, severity, cluster, namespace, node, pod, instance) (\n    tfirst_over_time(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}[$__range])\n  ) * 1000\n  unless\n  min by (alertname, severity, cluster, namespace, node, pod, instance) (\n    ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}\n  ),\n  \"status\", \"было\", \"\", \"\"\n)"
+            },
+            {
+              "refId": "to",
+              "format": "table",
+              "instant": true,
+              "expr": "max by (alertname, severity, cluster, namespace, node, pod, instance) (\n  tlast_over_time(ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}[$__range])\n) * 1000\nunless\nmax by (alertname, severity, cluster, namespace, node, pod, instance) (\n  ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"}\n)"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "countRows": true,
+              "reducer": [
+                "count"
+              ]
+            },
+            "sortBy": [
+              {
+                "displayName": "начало",
+                "desc": true
+              }
+            ]
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true,
+                "align": "left"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "статус"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 90
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "было": {
+                            "color": "green",
+                            "text": "было"
+                          },
+                          "горит": {
+                            "color": "red",
+                            "text": "горит"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "severity"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "info": {
+                            "color": "blue",
+                            "text": "info"
+                          },
+                          "warning": {
+                            "color": "orange",
+                            "text": "warning"
+                          },
+                          "error": {
+                            "color": "red",
+                            "text": "error"
+                          },
+                          "critical": {
+                            "color": "dark-red",
+                            "text": "critical"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "алерт"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 240
+                  },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "В Grafana Alerting",
+                        "url": "/alerting/groups?alertmanager=Alertmanager&queryString=alertname%3D${__data.fields.алерт:percentencode}",
+                        "targetBlank": false
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "node"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 160
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "pod"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 180
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "instance"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 160
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "/^(начало|конец)$/"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 170
+                  }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "alertstate": true
+                },
+                "renameByName": {
+                  "status": "статус",
+                  "Value #from": "начало",
+                  "Value #to": "конец",
+                  "Value #A": "начало",
+                  "Value #B": "конец",
+                  "alertname": "алерт",
+                  "cluster": "кластер"
+                },
+                "indexByName": {
+                  "статус": 0,
+                  "severity": 1,
+                  "алерт": 2,
+                  "кластер": 3,
+                  "namespace": 4,
+                  "node": 5,
+                  "pod": 6,
+                  "instance": 7,
+                  "начало": 8,
+                  "конец": 9
+                }
+              }
+            },
+            {
+              "id": "convertFieldType",
+              "options": {
+                "conversions": [
+                  {
+                    "targetField": "начало",
+                    "destinationType": "time"
+                  },
+                  {
+                    "targetField": "конец",
+                    "destinationType": "time"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "row",
+          "title": "Когда горело",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 34
+          }
+        },
+        {
+          "id": 14,
+          "type": "state-timeline",
+          "title": "Таймлайн по имени",
+          "description": "Один ряд = alertname + cluster (namespace и прочие лейблы схлопнуты). Цвет — максимальная severity в этот момент. Пробел — не горело.",
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 35
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max by (alertname, cluster) (\n  ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=\"info\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"} * 1\nor\n  ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=\"warning\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"} * 2\nor\n  ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=\"error\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"} * 3\nor\n  ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=\"critical\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"} * 4\n)",
+              "legendFormat": "{{alertname}} · {{cluster}}"
+            }
+          ],
+          "options": {
+            "mergeValues": true,
+            "showValue": "never",
+            "alignValue": "left",
+            "rowHeight": 0.8,
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            },
+            "perPage": 25
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 80,
+                "lineWidth": 0,
+                "spanNulls": false
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "info",
+                      "color": "blue"
+                    },
+                    "2": {
+                      "text": "warning",
+                      "color": "orange"
+                    },
+                    "3": {
+                      "text": "error",
+                      "color": "red"
+                    },
+                    "4": {
+                      "text": "critical",
+                      "color": "dark-red"
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "transparent",
+                    "value": null
+                  },
+                  {
+                    "color": "blue",
+                    "value": 1
+                  },
+                  {
+                    "color": "orange",
+                    "value": 2
+                  },
+                  {
+                    "color": "red",
+                    "value": 3
+                  },
+                  {
+                    "color": "dark-red",
+                    "value": 4
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Сколько горело, по severity",
+          "description": "Количество уникальных firing-серий в каждый момент. Стек по severity.",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 45
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count by (severity) (ALERTS{alertstate=\"firing\",alertname!=\"Watchdog\",severity=~\"$severity\",alertname=~\"$alertname\",cluster=~\"$cluster\"})",
+              "legendFormat": "{{severity}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "bars",
+                "lineInterpolation": "smooth",
+                "barAlignment": 0,
+                "fillOpacity": 70,
+                "gradientMode": "none",
+                "spanNulls": false,
+                "insertNulls": false,
+                "showPoints": "never",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "axisPlacement": "auto"
+              },
+              "decimals": 0,
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "info": {
+                      "color": "blue"
+                    },
+                    "warning": {
+                      "color": "orange"
+                    },
+                    "error": {
+                      "color": "red"
+                    },
+                    "critical": {
+                      "color": "dark-red"
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "critical"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "dark-red"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "error"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "red"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "warning"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "orange"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "info"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "blue"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }

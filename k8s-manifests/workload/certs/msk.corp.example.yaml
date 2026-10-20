@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: msk-corp-wildcard
+  namespace: kube-system
+spec:
+  commonName: msk.corp.example
+  dnsNames:
+  - msk.corp.example
+  - '*.msk.corp.example'
+  issuerRef:
+    kind: ClusterIssuer
+    name: technitium-letsencrypt
+  secretName: msk-corp-wildcard

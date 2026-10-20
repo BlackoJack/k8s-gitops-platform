@@ -1,0 +1,25 @@
+# Rails Prometheus at https://gitlab.corp.example/-/metrics.
+# Same monitoring IP allowlist as /-/health. Admin → Settings → Metrics
+# and profiling → "Enable GitLab Prometheus metrics endpoint" must be on.
+# Host exporters (gitlab-exporter, redis, postgres, node) are in gitlab-exporters.yaml.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: gitlab
+  namespace: monitoring
+spec:
+  jobName: gitlab
+  targetEndpoints:
+    - targets:
+        - gitlab.corp.example
+      scheme: https
+      path: /-/metrics
+      interval: 30s
+      scrapeTimeout: 25s
+      tlsConfig:
+        insecureSkipVerify: false
+      relabelConfigs:
+        - targetLabel: job
+          replacement: gitlab
+        - targetLabel: instance
+          replacement: gitlab.corp.example

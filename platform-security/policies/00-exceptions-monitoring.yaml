@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/kyverno.io/policyexception_v2.json
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: monitoring-restricted
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: pod-security-restricted
+      ruleNames:
+        - restricted
+        - autogen-restricted
+        - autogen-cronjob-restricted
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - Deployment
+            - ReplicaSet
+            - StatefulSet
+            - DaemonSet
+            - Job
+            - CronJob
+          namespaces:
+            - monitoring
+  podSecurity:
+    - controlName: Running as Non-root
+      images:
+        - "*"
+    - controlName: Running as Non-root user
+      images:
+        - "*"
+    - controlName: Privilege Escalation
+      images:
+        - "victoriametrics/operator:config-reloader-*"
+        - "docker.io/victoriametrics/operator:config-reloader-*"
+    - controlName: Capabilities
+      images:
+        - "victoriametrics/operator:config-reloader-*"
+        - "docker.io/victoriametrics/operator:config-reloader-*"
+    - controlName: Seccomp
+      images:
+        - "registry.k8s.io/kubectl:*"
+        - "ghcr.io/victoriametrics/sync-job:*"
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: monitoring-grafana-sidecars
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: require-probes
+      ruleNames:
+        - validate-probes
+  match:
+    any:
+      - resources:
+          kinds:
+            - Deployment
+          namespaces:
+            - monitoring
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: grafana
+---
+# Operator copies CR livenessProbe as readiness only; extra containers[].livenessProbe
+# is the real fix. Keep this until STS reports both probes.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: monitoring-storage-probes
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: require-probes
+      ruleNames:
+        - validate-probes
+  match:
+    any:
+      - resources:
+          kinds:
+            - StatefulSet
+          namespaces:
+            - monitoring
+          names:
+            - vmstorage-vmks
+            - vlstorage-vmks
+            - vtstorage-vmks
+
+

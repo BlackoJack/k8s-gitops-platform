@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: corp-wildcard
+  namespace: kube-system
+spec:
+  commonName: corp.example
+  dnsNames:
+  - corp.example
+  - '*.corp.example'
+  issuerRef:
+    kind: ClusterIssuer
+    name: technitium-letsencrypt
+  secretName: corp-wildcard

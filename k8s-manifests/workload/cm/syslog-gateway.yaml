@@ -1,0 +1,99 @@
+# VictoriaLogs syslog parser stores the device name as hostname and has no
+# rename flag. This gateway copies that value to host before insert.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syslog-gateway
+  namespace: monitoring
+data:
+  vector.yaml: |
+    data_dir: /var/lib/vector
+
+    api:
+      enabled: true
+      address: 0.0.0.0:8686
+
+    sources:
+      syslog_tcp:
+        type: syslog
+        mode: tcp
+        address: 0.0.0.0:5514
+      # The syslog source drops a datagram it cannot parse. Network devices
+      # often send a sequence number or no RFC3164 header at all, so UDP is
+      # accepted raw and parsed below. Unparsed text is still stored.
+      raw_udp:
+        type: socket
+        mode: udp
+        address: 0.0.0.0:5514
+        decoding:
+          codec: bytes
+
+    transforms:
+      udp_syslog:
+        type: remap
+        inputs:
+          - raw_udp
+        source: |
+          raw = replace(string!(.message), "\u{0}", "")
+          raw = replace(raw, "\r", "")
+          raw = replace(raw, "\n", "")
+          parsed, err = parse_syslog(raw)
+          if err != null {
+            stripped, strip_err = parse_regex(raw, r'^<(?P<pri>\d+)>\d+:\s*(?P<rest>.+)$')
+            if strip_err == null {
+              parsed, err = parse_syslog("<" + string!(stripped.pri) + ">" + string!(stripped.rest))
+            }
+          }
+          if err == null {
+            . = merge(., parsed)
+          } else {
+            # <pri>hostname %Mmm dd hh:mm:ss:mmm yyyy ...
+            vendor, vendor_err = parse_regex(raw, r'^<(?P<pri>\d+)>(?P<hostname>\S+)\s+%(?P<month>[A-Za-z]{3})\s+(?P<day>\d{1,2})\s+(?P<hms>\d{2}:\d{2}:\d{2}):\d+\s+(?P<year>\d{4})\s+(?P<body>.*)$')
+            if vendor_err == null {
+              .hostname = vendor.hostname
+              .message = vendor.body
+              ts, ts_err = parse_timestamp(string!(vendor.month) + " " + string!(vendor.day) + " " + string!(vendor.year) + " " + string!(vendor.hms), format: "%b %d %Y %H:%M:%S")
+              if ts_err == null {
+                .timestamp = ts
+              }
+            } else {
+              .message = raw
+            }
+          }
+      device:
+        type: remap
+        inputs:
+          - syslog_tcp
+          - udp_syslog
+        source: |
+          .log_kind = "network_device"
+          .cluster = "workload"
+          if exists(.hostname) {
+            name = string!(.hostname)
+            if name != "" {
+              .host = name
+            }
+            del(.hostname)
+          }
+
+    sinks:
+      victorialogs:
+        type: elasticsearch
+        inputs:
+          - device
+        endpoints:
+          - http://vlinsert-vmks.monitoring.svc.cluster.local:9481/insert/elasticsearch/
+        mode: bulk
+        api_version: v8
+        compression: gzip
+        healthcheck:
+          enabled: false
+        query:
+          _msg_field: message
+          _time_field: timestamp
+          _stream_fields: log_kind,host,appname
+          ignore_fields: source_type,port
+        buffer:
+          type: disk
+          max_size: 1073741824
+          when_full: block

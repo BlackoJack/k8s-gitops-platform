@@ -1,0 +1,138 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: angie
+  namespace: monitoring
+spec:
+  groups:
+    - name: angie
+      rules:
+        - alert: AngieScrapeFailed
+          expr: up{job="angie"} == 0
+          for: 2m
+          labels:
+            severity: warning
+            team: uptime
+          annotations:
+            summary: "Нет scrape Angie {{ $labels.instance }}"
+            description: "up=0 для job=angie на {{ $labels.instance }}. /p8s не отвечает из кластера: балансер, allow на location или сеть monitoring."
+            dashboard: "https://grafana.msk.corp.example/d/angie?var-instance={{ $labels.instance | urlquery }}"
+
+        # 3 unavailable = max_fails, 5 unhealthy = active health_check.
+        # 2 is `server ... down` in the config, 7 draining — not an outage.
+        - alert: AngieUpstreamPeerDown
+          expr: |
+            angie_http_upstreams_peers_state{job="angie"} == 3
+            or angie_http_upstreams_peers_state{job="angie"} == 5
+            or angie_stream_upstreams_peers_state{job="angie"} == 3
+          for: 2m
+          labels:
+            severity: warning
+            team: uptime
+          annotations:
+            summary: "Angie {{ $labels.instance }}: peer {{ $labels.peer }} в {{ $labels.upstream }} недоступен"
+            description: "На {{ $labels.instance }} peer {{ $labels.peer }} upstream {{ $labels.upstream }} в состоянии {{ $value | humanize }} (3 недоступен, 5 unhealthy) уже 2м."
+            dashboard: "https://grafana.msk.corp.example/d/angie?var-instance={{ $labels.instance | urlquery }}&var-upstream={{ $labels.upstream | urlquery }}"
+
+        # == bool keeps a 0 for every peer, so a fully dead upstream is 0
+        # rather than an empty series.
+        - alert: AngieUpstreamDown
+          expr: |
+            sum by (cluster, instance, upstream) (
+              angie_http_upstreams_peers_state{job="angie"} == bool 1
+            ) == 0
+            or
+            sum by (cluster, instance, upstream) (
+              angie_stream_upstreams_peers_state{job="angie"} == bool 1
+            ) == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: uptime
+          annotations:
+            summary: "Angie {{ $labels.instance }}: upstream {{ $labels.upstream }} без живых peer"
+            description: "На {{ $labels.instance }} ни один peer upstream {{ $labels.upstream }} не в состоянии up. Трафик этого upstream на этом балансере некуда отдать."
+            dashboard: "https://grafana.msk.corp.example/d/angie?var-instance={{ $labels.instance | urlquery }}&var-upstream={{ $labels.upstream | urlquery }}"
+
+        # Active check of every https server_name through each balancer.
+        # 301/302 are expected. 404 is a failure, except api.* (module
+        # http_vhost_api). 5xx, timeout and a bad certificate are failures.
+        - alert: AngieVhostDown
+          expr: probe_success{job="angie-vhost"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: uptime
+          annotations:
+            summary: "{{ $labels.endpoint }} не отвечает через {{ $labels.balancer }}"
+            description: "Проба https://{{ $labels.endpoint }} через {{ $labels.balancer }} не удалась (probe_success=0). Это обрыв, ошибка TLS, 5xx или 404. Для имён api.* ответ 404 на / алертом не считается."
+            dashboard: "https://grafana.msk.corp.example/d/angie?var-instance={{ $labels.balancer | urlquery }}&var-zone={{ $labels.vhost | urlquery }}"
+
+        - alert: AngieVhostCertExpiring
+          expr: |
+            min without (path, endpoint) ((probe_ssl_earliest_cert_expiry{job="angie-vhost"} - time()) / 86400) < 14
+            and
+            min without (path, endpoint) (probe_ssl_earliest_cert_expiry{job="angie-vhost"} - time()) > 0
+          for: 1h
+          labels:
+            severity: warning
+            team: uptime
+          annotations:
+            summary: "Сертификат {{ $labels.vhost }} на {{ $labels.balancer }} истекает через {{ $value | humanize }} дн."
+            description: "TLS-сертификат {{ $labels.vhost }}, который отдал {{ $labels.balancer }}, истечёт менее чем через 14 дней."
+            dashboard: "https://grafana.msk.corp.example/d/angie?var-instance={{ $labels.balancer | urlquery }}&var-zone={{ $labels.vhost | urlquery }}"
+
+        - alert: AngieVhostCertExpired
+          expr: min without (path, endpoint) (probe_ssl_earliest_cert_expiry{job="angie-vhost"} - time()) < 0
+          for: 5m
+          labels:
+            severity: critical
+            team: uptime
+          annotations:
+            summary: "Сертификат {{ $labels.vhost }} на {{ $labels.balancer }} истёк"
+            description: "TLS-сертификат {{ $labels.vhost }} на {{ $labels.balancer }} уже истёк. Клиенты перестанут принимать HTTPS."
+            dashboard: "https://grafana.msk.corp.example/d/angie?var-instance={{ $labels.balancer | urlquery }}&var-zone={{ $labels.vhost | urlquery }}"
+
+        # 5xx share on a real vhost. Scanner Host names are not in the probe
+        # list, so their 502s stay off this alert. Ten responses in 10m skips
+        # a single application 500.
+        - alert: AngieVhost5xx
+          expr: |
+            label_replace(
+              label_replace(
+                (
+                  (
+                    sum by (instance, zone) (rate(angie_http_server_zones_responses{job="angie",code=~"5.."}[10m]))
+                    /
+                    sum by (instance, zone) (rate(angie_http_server_zones_requests_total{job="angie"}[10m]))
+                  ) > 0.05
+                  and
+                  sum by (instance, zone) (increase(angie_http_server_zones_responses{job="angie",code=~"5.."}[10m])) > 10
+                  and on(zone) count by (zone) (probe_success{job="angie-vhost"})
+                ),
+                "vhost", "$1", "zone", "(.+)"
+              ),
+              "balancer", "$1", "instance", "(.+)"
+            )
+          for: 5m
+          labels:
+            severity: warning
+            team: uptime
+          annotations:
+            summary: "{{ $labels.vhost }} через {{ $labels.balancer }}: {{ $value | humanizePercentage }} ответов 5xx"
+            description: "За 10 минут больше 5% ответов {{ $labels.vhost }} на {{ $labels.balancer }} — коды 5xx, и таких ответов больше 10. Это ошибка приложения или upstream, peer при этом может оставаться up."
+            dashboard: "https://grafana.msk.corp.example/d/angie?var-instance={{ $labels.balancer | urlquery }}&var-zone={{ $labels.vhost | urlquery }}"
+
+        - alert: AngieVhostSlow
+          expr: |
+            probe_success{job="angie-vhost"} == 1
+            and
+            probe_duration_seconds{job="angie-vhost"} > 5
+          for: 10m
+          labels:
+            severity: warning
+            team: uptime
+          annotations:
+            summary: "{{ $labels.endpoint }} через {{ $labels.balancer }} отвечает {{ $value | humanizeDuration }}"
+            description: "Проба https://{{ $labels.endpoint }} через {{ $labels.balancer }} дольше 5 секунд уже 10 минут."
+            dashboard: "https://grafana.msk.corp.example/d/angie?var-instance={{ $labels.balancer | urlquery }}&var-zone={{ $labels.vhost | urlquery }}"

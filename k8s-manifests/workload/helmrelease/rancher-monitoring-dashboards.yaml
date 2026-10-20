@@ -1,0 +1,105 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rancher-monitoring-dashboards
+  namespace: cattle-monitoring-system
+spec:
+  interval: 30m
+  timeout: 10m
+  releaseName: rancher-monitoring-dashboards
+  dependsOn:
+    - name: victoria-metrics-k8s-stack
+      namespace: monitoring
+    - name: rancher-monitoring-crd
+      namespace: cattle-monitoring-system
+  chart:
+    spec:
+      chart: rancher-monitoring-dashboards
+      version: "110.0.0+up0.1.2"
+      interval: 1h
+      sourceRef:
+        kind: HelmRepository
+        name: rancher-charts
+        namespace: flux-system
+  install:
+    createNamespace: true
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    global:
+      cattle:
+        clusterName: workload
+        # Downstream cluster ID from rancher. Until set, Grafana iframe
+        # assets fall back to grafana.msk.corp.example (allow_embedding).
+        # kubectl --context management -n fleet-default get clusters.provisioning.cattle.io workload -o jsonpath='{.status.clusterName}'
+        clusterId: c-example
+
+    dashboardArtifacts:
+      enabled: true
+      namespace: cattle-dashboards
+      annotations:
+        grafana_folder: Rancher
+      groups:
+        rancherCore: true
+        fleet: true
+        ingressNginx: true
+        performance: true
+        logging:
+          fluentd: false
+          fluentbit: false
+        backupRestore: false
+
+    grafanaProxy:
+      enabled: true
+      upstreamService: vmks-grafana
+      upstreamPort: 80
+
+    prometheusProxy:
+      enabled: true
+      upstreamService: vmselect-prometheus
+      upstreamPort: 9090
+
+    alertmanagerProxy:
+      enabled: true
+      upstreamService: vmalertmanager-vmks
+      upstreamPort: 9093
+
+    monitoringProxy:
+      replicas: 1
+      nodeSelector:
+        environment: infra
+      tolerations:
+        - key: environment
+          operator: Equal
+          value: infra
+          effect: PreferNoSchedule
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+    k3sServer:
+      enabled: false
+    etcd:
+      enabled: false
+    kubeStateMetrics:
+      enabled: false
+    nodeExporter:
+      enabled: false
+    defaultRules:
+      create: false
+
+    grafana:
+      enabled: false
+      sidecar:
+        dashboards:
+          label: grafana_dashboard
+          labelValue: "1"
+          annotations:
+            grafana_folder: Rancher

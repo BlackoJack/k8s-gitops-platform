@@ -1,0 +1,21 @@
+# Extra apex domains on top of Technitium /api/zones/list.
+# Subdomains (msk.corp.example, corp.example) are folded to the registrable name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: domain-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: domain-exporter
+data:
+  domains.yaml: |
+    # Apex extras not present in Technitium (e.g. Angie balancer vhosts).
+    # Disabled Technitium zones are skipped even if listed there.
+    domains:
+      - shop.example
+      - billing.example
+      - status.example
+    # Optional: skip even if Technitium has the zone.
+    exclude:
+      - legacy.example
+      - sandbox.example

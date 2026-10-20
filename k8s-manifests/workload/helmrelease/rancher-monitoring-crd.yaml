@@ -1,0 +1,27 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rancher-monitoring-crd
+  namespace: cattle-monitoring-system
+spec:
+  interval: 30m
+  timeout: 10m
+  releaseName: rancher-monitoring-crd
+  chart:
+    spec:
+      chart: rancher-monitoring-crd
+      version: "110.0.0+up80.9.1-rancher.18"
+      interval: 1h
+      sourceRef:
+        kind: HelmRepository
+        name: rancher-charts
+        namespace: flux-system
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3

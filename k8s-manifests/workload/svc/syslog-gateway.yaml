@@ -1,0 +1,28 @@
+# Stable syslog target for switches and routers.
+# 201 traefik, 202 ingress-nginx, 203 cilium, 204 hubble, 205 API.
+apiVersion: v1
+kind: Service
+metadata:
+  name: syslog-gateway
+  namespace: monitoring
+  labels:
+    io.cilium/lb-managed: "true"
+    external-dns.corp.example/enabled: "true"
+  annotations:
+    lbipam.cilium.io/ips: "10.16.0.206"
+    external-dns.alpha.kubernetes.io/hostname: syslog.msk.corp.example
+spec:
+  type: LoadBalancer
+  allocateLoadBalancerNodePorts: false
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: syslog-gateway
+  ports:
+    - name: syslog-udp
+      port: 514
+      targetPort: 5514
+      protocol: UDP
+    - name: syslog-tcp
+      port: 514
+      targetPort: 5514
+      protocol: TCP

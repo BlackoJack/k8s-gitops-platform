@@ -1,0 +1,77 @@
+# Overlay для bundled HelmChart, пока RKE2 его ещё ставит.
+# Источник правды после disable — helmrelease/rke2-traefik.yaml
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-traefik
+  namespace: kube-system
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  valuesContent: |-
+    deployment:
+      kind: Deployment
+      replicas: null
+      minReadySeconds: 10
+    updateStrategy:
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 1
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: rke2-traefik
+    nodeSelector:
+      environment: ingress
+    tolerations:
+      - key: environment
+        operator: Equal
+        value: ingress
+        effect: NoSchedule
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 4
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+    ports:
+      web:
+        port: 8000
+        expose:
+          default: true
+        exposedPort: 80
+        hostPort: null
+      websecure:
+        port: 8443
+        expose:
+          default: true
+        exposedPort: 443
+        hostPort: null
+        tls:
+          enabled: true
+    tlsStore:
+      default:
+        defaultCertificate:
+          secretName: msk-corp-wildcard
+    ingressClass:
+      enabled: true
+      isDefaultClass: false
+    service:
+      enabled: true
+      spec:
+        type: LoadBalancer
+      labels:
+        io.cilium/lb-managed: "true"
+      annotations:
+        lbipam.cilium.io/ips: "10.16.0.201"

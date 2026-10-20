@@ -1,0 +1,25 @@
+# Chart ServiceMonitor is off; VM operator scrapes the chart Service (:8085).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: cluster-autoscaler
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: cluster-autoscaler
+      monitoring.corp.example/scrape: "true"
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      relabelConfigs:
+        - targetLabel: job
+          replacement: cluster-autoscaler
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

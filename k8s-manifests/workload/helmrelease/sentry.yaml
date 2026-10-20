@@ -1,0 +1,590 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: sentry
+  namespace: sentry
+spec:
+  interval: 5m
+  timeout: 30m
+
+  chart:
+    spec:
+      chart: sentry
+      version: ">=33.6.0"
+      sourceRef:
+        kind: HelmRepository
+        name: sentry
+        namespace: sentry
+  install:
+    createNamespace: true
+  values:
+    config:
+      sentryConfPy: |
+         SENTRY_DISALLOWED_IPS = []
+         LOGGING['loggers']['sentry.relay.config.ai_model_costs'] = {
+             'level': 'ERROR',
+             'handlers': ['console'],
+             'propagate': False,
+         }
+         SENTRY_OPTIONS.pop('mail.use-tls', None)
+         SENTRY_OPTIONS.pop('mail.use-ssl', None)
+         SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+         USE_X_FORWARDED_HOST = True
+         SOCIAL_AUTH_REDIRECT_IS_HTTPS = True
+         # signed_cookies + Secure after a non-Secure sentrysid = duplicate
+         # cookies; Django reads the stale one → user.auth.invalid-nonce.
+         SESSION_ENGINE = 'django.contrib.sessions.backends.cached_db'
+         SESSION_COOKIE_NAME = 'sentrysid2'
+         CSRF_COOKIE_NAME = 'sc2'
+         SESSION_COOKIE_SECURE = True
+         CSRF_COOKIE_SECURE = True
+         SESSION_COOKIE_SAMESITE = 'Lax'
+         CSRF_COOKIE_SAMESITE = 'Lax'
+
+    system:
+      url: "https://sentry.msk.corp.example"
+      adminEmail: "admin@corp.example"
+
+    user:
+      create: true
+      email: "admin@corp.example"
+      existingSecret: "sentry-secrets"
+      existingSecretKey: "ADMIN_PASSWORD"
+
+    asHook: false
+    profiles:
+      - feature-complete
+
+    # kubelet default ndots:5 → names with <5 dots (postgres.corp.example)
+    # are queried as name.sentry.svc.cluster.local first. Hubble shows that, and
+    # CoreDNS rewrite only fixes the answer, not the query. ndots:1 makes the
+    # real FQDN the first lookup; short in-cluster names still use search.
+    # searches: custom dnsConfig replaces the chart's taskworker search path.
+    # --num-brokers=1 looks up sentry-taskbroker-<name>-0 via these domains.
+    dnsConfig:
+      searches:
+        - sentry-taskbroker-default.sentry.svc.cluster.local
+        - sentry-taskbroker-ingest.sentry.svc.cluster.local
+        - sentry-taskbroker-products.sentry.svc.cluster.local
+      options:
+        - name: ndots
+          value: "1"
+
+    global:
+      nodeSelector:
+        environment: infra
+      tolerations:
+        - key: "environment"
+          operator: "Equal"
+          value: "infra"
+          effect: "PreferNoSchedule"
+
+    ingress:
+      enabled: true
+      ingressClassName: cilium
+      regexPathStyle: cilium
+      labels:
+        external-dns.corp.example/enabled: "true"
+      annotations:
+        kubernetes.io/ingress.class: cilium
+      pathRules:
+        cilium:
+          # UI bootstrap (not /api/0). Prefix /api would send this to Relay.
+          - path: /api/client-config
+            service: web
+            pathType: Prefix
+          - path: /api/embed
+            service: web
+            pathType: Prefix
+          - path: /api/hooks
+            service: web
+            pathType: Prefix
+          - path: /api/0/relays
+            service: relay
+            pathType: Prefix
+          - path: /api/0
+            service: web
+            pathType: Prefix
+          - path: /api/store
+            service: relay
+            pathType: Prefix
+          - path: /api
+            service: relay
+            pathType: Prefix
+          - path: /
+            service: web
+            pathType: Prefix
+      hostname: "sentry.msk.corp.example"
+      tls:
+        - hosts:
+            - "sentry.msk.corp.example"
+
+    clickhouse:
+      enabled: false
+
+    externalClickhouse:
+      host: clickhouse.corp.example
+      tcpPort: 9000
+      httpPort: 8123
+      database: sentry
+      username: sentry
+      password: "REDACTED"
+      singleNode: true
+      clusterName: default
+
+    postgresql:
+      enabled: false
+
+    externalPostgresql:
+      host: postgres.corp.example
+      port: 5432
+      username: sentry
+      existingSecret: sentry-secrets
+      existingSecretKeys:
+        password: POSTGRES_PASSWORD
+      database: sentry
+
+    kafka:
+      enabled: true
+      extraConfig: |
+        message.max.bytes=50000000
+        replica.fetch.max.bytes=50000000
+      controller:
+        extraConfig: |
+          message.max.bytes=50000000
+          replica.fetch.max.bytes=50000000
+        # Preset is ignored when affinity is set. labelSelector without
+        # namespaces matches only the pod namespace, so vmstorage in
+        # monitoring was invisible and kafka stayed on fntg8.
+        # Descheduler must not bounce a controller: one eviction is a
+        # quorum election, and the anti-affinity already places it.
+        podAnnotations:
+          descheduler.alpha.kubernetes.io/prefer-no-eviction: "true"
+        podAntiAffinityPreset: hard
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: controller-eligible
+                    app.kubernetes.io/instance: sentry
+                    app.kubernetes.io/name: kafka
+                topologyKey: kubernetes.io/hostname
+              - labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: vmstorage
+                    app.kubernetes.io/instance: vmks
+                namespaces:
+                  - monitoring
+                topologyKey: kubernetes.io/hostname
+        initContainerResources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
+        resources:
+          requests:
+            memory: "1660Mi"
+            cpu: "86m"
+          limits:
+            memory: "1660Mi"
+        nodeSelector:
+          environment: infra
+        tolerations:
+          - key: "environment"
+            operator: "Equal"
+            value: "infra"
+            effect: "PreferNoSchedule"
+      persistence:
+        enabled: true
+        size: 10Gi
+        storageClass: ha-nfs
+
+    zookeeper:
+      enabled: false
+      persistence:
+        storageClass: ha-nfs
+
+    vroom:
+      enabled: true
+      affinity: &affinity-prefer-node-spread
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    release: sentry
+                topologyKey: kubernetes.io/hostname
+      persistence:
+        enabled: true
+      resources:
+        requests:
+          memory: "768Mi"
+          cpu: "50m"
+        limits:
+          memory: "768Mi"
+    uptimeChecker:
+      enabled: false
+    launchpadTaskWorker:
+      enabled: false
+    geodata:
+      enabled: false
+      persistence:
+        enabled: true
+    symbolicator:
+      enabled: true
+      api:
+        affinity: *affinity-prefer-node-spread
+        # RSS ~74Mi; 256Mi is the ns LimitRange default (Guaranteed QoS).
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+        cleaner:
+          # RSS ~66Mi — 64Mi limit would OOMKill.
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+      persistence:
+        enabled: true
+
+    relay:
+      enabled: true
+      affinity: *affinity-prefer-node-spread
+      logging:
+        level: info
+        format: json
+      cache:
+        envelopeBufferSize: 1000
+      init:
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+      resources:
+        requests:
+          memory: "315Mi"
+          cpu: "188m"
+        limits:
+          memory: "315Mi"
+    sentry:
+      web:
+        enabled: true
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    release: sentry
+                    role: web
+                topologyKey: kubernetes.io/hostname
+              - labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: vmstorage
+                    app.kubernetes.io/instance: vmks
+                topologyKey: kubernetes.io/hostname
+        probeFailureThreshold: 5
+        probeInitialDelaySeconds: 10
+        probePeriodSeconds: 15
+        probeSuccessThreshold: 1
+        probeTimeoutSeconds: 5
+        resources:
+          requests:
+            memory: "2048Mi"
+            cpu: "1022m"
+          limits:
+            memory: "2048Mi"
+        autoscaling:
+          enabled: true
+          minReplicas: 1
+          maxReplicas: 2
+          targetCPUUtilizationPercentage: 80
+          # Memory HPA is wrong here: each web process holds ~1.3Gi RSS
+          # regardless of replica count. ceil(2 * 65/80) stays at maxReplicas
+          # forever (KubeHPAMaxedOut) while CPU is idle.
+      features:
+        enableProfiling: true
+        enableSpan: true
+        enableSessionReplay: false
+        enableFeedback: false
+        enableUptime: false
+      cleanup:
+        enabled: true
+        concurrencyPolicy: Forbid
+        activeDeadlineSeconds: 3600
+        resources:
+          requests:
+            memory: "768Mi"
+            cpu: "50m"
+          limits:
+            memory: "768Mi"
+      taskBroker:
+        enabled: true
+        affinity: *affinity-prefer-node-spread
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+        # SQLite + NFS WAL: pool waits 20–30s, vacuum holds the lock,
+        # workers miss liveness (rm /tmp/health.txt) and get SIGKILL 137.
+        # Kafka is the durable queue; emptyDir only loses in-flight activations.
+        persistence:
+          enabled: false
+      taskScheduler:
+        enabled: true
+        affinity: *affinity-prefer-node-spread
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "118m"
+          limits:
+            memory: "512Mi"
+      taskWorker:
+        enabled: true
+        affinity: *affinity-prefer-node-spread
+        concurrency: 1
+        workers:
+          - name: default
+            brokerName: default
+            brokerReplicas: 1
+            concurrency: 1
+            replicas: 1
+          - name: ingest
+            brokerName: ingest
+            brokerReplicas: 1
+            concurrency: 1
+            replicas: 1
+          - name: products
+            brokerName: products
+            brokerReplicas: 1
+            concurrency: 1
+            replicas: 1
+        resources:
+          requests:
+            memory: "768Mi"
+            cpu: "200m"
+          limits:
+            memory: "768Mi"
+      ingestConsumerAttachments:
+        resources: &sentry-consumer-resources
+          requests:
+            memory: "768Mi"
+            cpu: "50m"
+          limits:
+            memory: "768Mi"
+      ingestConsumerEvents:
+        resources: *sentry-consumer-resources
+      postProcessForwardErrors:
+        resources: *sentry-consumer-resources
+      ingestConsumerTransactions:
+        enabled: true
+        resources: *sentry-consumer-resources
+      processSpans:
+        enabled: true
+        resources: *sentry-consumer-resources
+      processSegments:
+        enabled: true
+        resources: *sentry-consumer-resources
+      postProcessForwardTransactions:
+        enabled: true
+        resources: *sentry-consumer-resources
+      genericMetricsConsumer:
+        enabled: true
+        resources: *sentry-consumer-resources
+      metricsConsumer:
+        enabled: true
+        resources: *sentry-consumer-resources
+      ingestReplayRecordings:
+        enabled: false
+      ingestOccurrences:
+        enabled: false
+      ingestFeedback:
+        enabled: false
+      ingestMonitors:
+        enabled: false
+      monitorsClockTasks:
+        enabled: false
+      monitorsClockTick:
+        enabled: false
+      uptimeResults:
+        enabled: false
+      postProcessForwardIssuePlatform:
+        enabled: false
+      billingMetricsConsumer:
+        enabled: false
+
+    snuba:
+        api:
+          enabled: true
+          affinity: *affinity-prefer-node-spread
+          resources:
+            requests:
+              memory: "1536Mi"
+              cpu: "50m"
+            limits:
+              memory: "1536Mi"
+        # Committed offset 1322774 > log-end 1322764 → Offset out of range.
+        # Chart default is strict reset, so rust-consumer CrashLoop's instead
+        # of skipping. Same flags as getsentry/self-hosted eap_items.
+        eapItemsConsumer:
+          enabled: true
+          autoOffsetReset: latest
+          noStrictOffsetReset: true
+          resources: &snuba-rust-resources
+            requests:
+              memory: "256Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+        consumer:
+          resources: *snuba-rust-resources
+        replacer:
+          resources: *snuba-rust-resources
+        outcomesConsumer:
+          resources: *snuba-rust-resources
+        outcomesAcceptedConsumer:
+          resources: *snuba-rust-resources
+        # RSS ~221Mi under the 256Mi LimitRange — leave headroom for spikes.
+        groupAttributesConsumer:
+          resources:
+            requests:
+              memory: "384Mi"
+              cpu: "50m"
+            limits:
+              memory: "384Mi"
+        subscriptionConsumerEvents:
+          resources: *snuba-rust-resources
+        metricsConsumer:
+          enabled: true
+          resources: *snuba-rust-resources
+        subscriptionConsumerEapItems:
+          enabled: true
+          resources: *snuba-rust-resources
+        subscriptionConsumerTransactions:
+          enabled: true
+          resources: *snuba-rust-resources
+        subscriptionConsumerMetrics:
+          enabled: true
+          resources: *snuba-rust-resources
+        subscriptionConsumerGenericMetricsDistributions:
+          enabled: true
+          resources: *snuba-rust-resources
+        subscriptionConsumerGenericMetricsSets:
+          enabled: true
+          resources: *snuba-rust-resources
+        subscriptionConsumerGenericMetricsCounters:
+          enabled: true
+          resources: *snuba-rust-resources
+        subscriptionConsumerGenericMetricsGauges:
+          enabled: true
+          resources: *snuba-rust-resources
+        genericMetricsGaugesConsumer:
+          enabled: true
+          resources: *snuba-rust-resources
+        genericMetricsCountersConsumer:
+          enabled: true
+          resources: *snuba-rust-resources
+        genericMetricsDistributionConsumer:
+          enabled: true
+          resources: *snuba-rust-resources
+        genericMetricsSetsConsumer:
+          enabled: true
+          resources: *snuba-rust-resources
+        replaysConsumer:
+          enabled: false
+        # rust-consumer without --use-rust-processor (chart 33.8) forks a
+        # Python TransactionsMessageProcessor pool. LimitRange 256Mi kills
+        # it at worker init (OOMKilled 137, CrashLoop). Same Guaranteed QoS
+        # as sentry ingest consumers.
+        transactionsConsumer:
+          enabled: true
+          resources: *sentry-consumer-resources
+        profilingProfilesConsumer:
+          enabled: true
+          resources: *snuba-rust-resources
+        profilingFunctionsConsumer:
+          enabled: true
+          resources: *snuba-rust-resources
+        profilingChunksConsumer:
+          enabled: true
+          resources: *snuba-rust-resources
+        issueOccurrenceConsumer:
+          enabled: false
+        outcomesBillingConsumer:
+          enabled: false
+
+    redis:
+      enabled: true
+      architecture: standalone
+      master:
+        disableCommands: []
+        nodeSelector:
+          environment: infra
+        tolerations:
+          - key: "environment"
+            operator: "Equal"
+            value: "infra"
+            effect: "PreferNoSchedule"
+        persistence:
+          enabled: true
+          size: 5Gi
+          storageClass: ha-nfs
+        resources:
+          requests:
+            memory: "768Mi"
+            cpu: 50m
+          limits:
+            memory: "768Mi"
+        extraFlags:
+          - "--appendonly yes"
+          - "--appendfsync no"
+          - "--no-appendfsync-on-rewrite yes"
+          - "--aof-rewrite-incremental-fsync yes"
+          - "--rdb-save-incremental-fsync yes"
+          - "--aof-use-rdb-preamble yes"
+          - "--maxmemory 512mb"
+          - "--maxmemory-policy allkeys-lru"
+          - "--lazyfree-lazy-eviction yes"
+          - "--lazyfree-lazy-expire yes"
+
+    memcached:
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+
+    filestore:
+      backend: s3
+      s3:
+        endpointUrl: "minio.msk.corp.example"
+        accessKeyIdRef:
+          name: sentry-s3-secret
+          key: accessKey
+        secretAccessKeyRef:
+          name: sentry-s3-secret
+          key: secretAccessKey
+        bucketName: sentry-filestore
+      profiles:
+        backend: s3
+        s3:
+          endpointUrl: "minio.msk.corp.example"
+          accessKeyIdRef:
+            name: sentry-s3-secret
+            key: accessKey
+          secretAccessKeyRef:
+            name: sentry-s3-secret
+            key: secretAccessKey
+          bucketName: sentry-profiles

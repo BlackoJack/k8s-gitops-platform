@@ -1,0 +1,63 @@
+# 1Gi request, almost no usage. Holds spare allocatable memory so a real
+# pod preempts a placeholder instead of packing a node up to the 90% alert.
+# Five replicas fit the infra nodes that currently have >=1Gi free
+# (vz8n4, p9k9l, d8bt8, 2drzg, fntg8). More than that stays Pending and
+# worker-infra scale-up stops at max with PodUnschedulable left firing.
+# ScheduleAnyway keeps the spare on the nodes that have room.
+# prefer-no-eviction: descheduler would otherwise evict this pause first
+# (lowest priority) and the hot node's real memory would not move.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overprovisioning
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: overprovisioning
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: overprovisioning
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: overprovisioning
+      annotations:
+        descheduler.alpha.kubernetes.io/prefer-no-eviction: "true"
+    spec:
+      priorityClassName: overprovisioning
+      terminationGracePeriodSeconds: 0
+      nodeSelector:
+        environment: infra
+      tolerations:
+        - key: environment
+          operator: Equal
+          value: infra
+          effect: PreferNoSchedule
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: overprovisioning
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65535
+        runAsGroup: 65535
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 10m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

@@ -1,0 +1,18 @@
+# Infra nodes are ~7.3Gi. request < limit lets the scheduler pack to 95%
+# requests while cgroup still allows ~2x burst → node OOM / kubelet NotReady.
+# default == defaultRequest → Guaranteed QoS, packing == max usage.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: sentry-defaults
+  namespace: sentry
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 256Mi
+      default:
+        memory: 256Mi
+      max:
+        memory: 4Gi

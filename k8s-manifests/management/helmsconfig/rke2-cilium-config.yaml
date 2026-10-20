@@ -1,0 +1,76 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-cilium
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    kubeProxyReplacement: true
+    k8sServiceHost: "localhost"
+    k8sServicePort: "6443"
+    l2announcements:
+      enabled: true
+    bpf:
+      masquerade: true
+      hostRouting: true
+    bandwidthManager:
+      enabled: true
+      bbr: false
+    loadBalancer:
+      algorithm: maglev
+    prometheus:
+      enabled: true
+      metricsService: true
+      serviceMonitor:
+        enabled: false
+
+    envoy:
+      prometheus:
+        enabled: true
+        serviceMonitor:
+          enabled: false
+
+    operator:
+      prometheus:
+        enabled: true
+        metricsService: true
+        serviceMonitor:
+          enabled: false
+
+    hubble:
+      enabled: true
+      metrics:
+        enableOpenMetrics: true
+        enabled:
+          - "dns:query;sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload"
+          - "drop:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+          - "tcp:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+          - "flow:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+          - "icmp:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+          - "httpV2:exemplars=true;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction"
+        serviceMonitor:
+          enabled: false
+      relay:
+        enabled: true
+      ui:
+        enabled: true
+        ingress:
+          enabled: false
+        service:
+          type: LoadBalancer
+          labels:
+            io.cilium/lb-managed: "true"
+          annotations:
+            lbipam.cilium.io/ips: "10.16.0.184"
+    ingressController:
+      enabled: true
+      default: true
+      loadbalancerMode: shared
+      defaultSecretNamespace: kube-system
+      defaultSecretName: msk-corp-wildcard
+      service:
+        type: LoadBalancer
+        labels:
+          io.cilium/lb-managed: "true"
+        annotations:
+          lbipam.cilium.io/ips: "10.16.0.182"

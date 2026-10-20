@@ -1,0 +1,80 @@
+# DNS health of Technitium on dns-1/2. Target is the nameserver, not CoreDNS.
+# Zones = what this cluster actually uses (external-dns + public sites).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: technitium-dns-msk
+  namespace: monitoring
+spec:
+  jobName: technitium-dns
+  interval: 30s
+  scrapeTimeout: 10s
+  module: dns_soa_msk
+  vmProberSpec:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    static:
+      labels:
+        zone: msk.corp.example
+        proto: udp
+      targets:
+        - dns-1.corp.example:53
+        - dns-2.corp.example:53
+      relabelingConfigs:
+        - sourceLabels: [__param_target]
+          regex: (dns-[0-9]+).*
+          replacement: $1
+          targetLabel: instance
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: technitium-dns-corp
+  namespace: monitoring
+spec:
+  jobName: technitium-dns
+  interval: 30s
+  scrapeTimeout: 10s
+  module: dns_soa_corp
+  vmProberSpec:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    static:
+      labels:
+        zone: corp.example
+        proto: udp
+      targets:
+        - dns-1.corp.example:53
+        - dns-2.corp.example:53
+      relabelingConfigs:
+        - sourceLabels: [__param_target]
+          regex: (dns-[0-9]+).*
+          replacement: $1
+          targetLabel: instance
+---
+# Admin UI / API :5380 — Prometheus scrape. cert-manager DNS-01 goes to
+# https://dns.msk.corp.example; Angie pins records/add|delete to ns-1.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: technitium-admin
+  namespace: monitoring
+spec:
+  jobName: technitium-admin
+  interval: 1m
+  scrapeTimeout: 15s
+  module: http_2xx
+  vmProberSpec:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    static:
+      labels:
+        probe: admin
+      targets:
+        - http://dns-1.corp.example:5380/
+        - http://dns-2.corp.example:5380/
+      relabelingConfigs:
+        - sourceLabels: [__param_target]
+          regex: .*(dns-[0-9]+).*
+          replacement: $1
+          targetLabel: instance

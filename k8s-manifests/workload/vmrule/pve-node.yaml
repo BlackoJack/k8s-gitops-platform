@@ -1,0 +1,96 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: pve-node
+  namespace: monitoring
+spec:
+  groups:
+    - name: pve-node
+      rules:
+        - alert: PveNodeScrapeFailed
+          expr: up{job="pve-node"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Нет scrape node_exporter {{ $labels.instance }}"
+            description: "up=0 для job=pve-node. VM выключена, :9100 закрыт, или Endpoints в monitoring/pve-node устарели относительно инвентаря гипервизора."
+            dashboard: "https://grafana.msk.corp.example/d/pve-node?var-instance={{ $labels.instance | urlquery }}"
+
+        - alert: PveNodeHighCpu
+          expr: |
+            1 - avg by (cluster, instance) (
+              rate(node_cpu_seconds_total{job="pve-node",mode="idle"}[5m])
+            ) > 0.9
+          for: 15m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "CPU {{ $labels.instance }} >90% 15м"
+            description: "Средняя загрузка {{ $value | humanizePercentage }} на PVE VM {{ $labels.instance }}."
+            dashboard: "https://grafana.msk.corp.example/d/pve-node?var-instance={{ $labels.instance | urlquery }}"
+
+        - alert: PveNodeMemoryLow
+          expr: |
+            (
+              node_memory_MemAvailable_bytes{job="pve-node"}
+              / node_memory_MemTotal_bytes{job="pve-node"}
+            ) < 0.1
+          for: 10m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Мало RAM на {{ $labels.instance }} ({{ $value | humanizePercentage }} свободно)"
+            description: "MemAvailable <10% на PVE VM {{ $labels.instance }}."
+            dashboard: "https://grafana.msk.corp.example/d/pve-node?var-instance={{ $labels.instance | urlquery }}"
+
+        - alert: PveNodeDiskFillingUp
+          expr: |
+            (
+              node_filesystem_avail_bytes{job="pve-node",fstype=~"ext4|xfs|btrfs"}
+              / node_filesystem_size_bytes{job="pve-node",fstype=~"ext4|xfs|btrfs"}
+            ) < 0.15
+            and node_filesystem_readonly{job="pve-node",fstype=~"ext4|xfs|btrfs"} == 0
+          for: 15m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Диск {{ $labels.mountpoint }} на {{ $labels.instance }} заполняется"
+            description: "Свободно {{ $value | humanizePercentage }} на {{ $labels.mountpoint }} ({{ $labels.fstype }}) VM {{ $labels.instance }}."
+            dashboard: "https://grafana.msk.corp.example/d/pve-node?var-instance={{ $labels.instance | urlquery }}"
+
+        - alert: PveNodeDiskFillingUp
+          expr: |
+            (
+              node_filesystem_avail_bytes{job="pve-node",fstype=~"ext4|xfs|btrfs"}
+              / node_filesystem_size_bytes{job="pve-node",fstype=~"ext4|xfs|btrfs"}
+            ) < 0.05
+            and node_filesystem_readonly{job="pve-node",fstype=~"ext4|xfs|btrfs"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "Диск {{ $labels.mountpoint }} на {{ $labels.instance }} почти полный"
+            description: "Свободно {{ $value | humanizePercentage }} на {{ $labels.mountpoint }} VM {{ $labels.instance }}."
+            dashboard: "https://grafana.msk.corp.example/d/pve-node?var-instance={{ $labels.instance | urlquery }}"
+
+        - alert: PveNodeRebooted
+          expr: |
+            (time() - node_boot_time_seconds{job="pve-node"})
+            and on (cluster, instance)
+            (node_boot_time_seconds{job="pve-node"} - node_boot_time_seconds{job="pve-node"} offset 1h) > 0
+            and on (cluster, instance)
+            (time() - node_boot_time_seconds{job="pve-node"}) < 3600
+          for: 1m
+          labels:
+            severity: warning
+            node: '{{ $labels.instance }}'
+          annotations:
+            summary: "VM {{ $labels.instance }} перезагрузилась"
+            description: "Uptime после reboot {{ $value | humanizeDuration }}."
+            dashboard: "https://grafana.msk.corp.example/d/pve-node?var-instance={{ $labels.instance | urlquery }}"

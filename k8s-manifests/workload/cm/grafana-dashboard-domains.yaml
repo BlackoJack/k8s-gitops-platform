@@ -1,0 +1,335 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-domains
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Uptime
+data:
+  domains.json: |
+    {
+      "uid": "domains",
+      "title": "Domains",
+      "description": "Срок оплаты регистрации доменов (RDAP/WHOIS). Список — apex-зоны Technitium; extras — cm/domain-exporter.yaml.",
+      "tags": ["platform", "uptime", "domains", "whois"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "5m",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "targetBlank": true,
+          "title": "Alertmanager",
+          "type": "link",
+          "url": "https://alertmanager.msk.corp.example"
+        },
+        {
+          "asDropdown": false,
+          "icon": "dashboard",
+          "targetBlank": false,
+          "title": "Uptime HTTP",
+          "type": "link",
+          "url": "/d/uptime-http"
+        }
+      ],
+      "time": { "from": "now-7d", "to": "now" },
+      "timepicker": {
+        "refresh_intervals": ["5m", "15m", "30m", "1h"]
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": { "text": "VictoriaMetrics Prometheus", "value": "VictoriaMetricsProm" },
+            "hide": 0
+          },
+          {
+            "name": "domain",
+            "label": "Domain",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(domain_expiry_days{job=\"domain-exporter\"}, domain)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Overview",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Domains",
+          "gridPos": { "h": 4, "w": 3, "x": 0, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "instant": true, "expr": "count(count by (domain) (last_over_time(domain_expiry_days{job=\"domain-exporter\",domain=~\"$domain\"}[2m]))) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Lookup OK",
+          "gridPos": { "h": 4, "w": 3, "x": 3, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "instant": true, "expr": "min(max by (domain) (last_over_time(domain_probe_success{job=\"domain-exporter\",domain=~\"$domain\"}[2m]))) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "FAIL", "color": "red" }, "1": { "text": "OK", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Expired",
+          "description": "paid-till уже в прошлом (ещё может быть grace / free-date).",
+          "gridPos": { "h": 4, "w": 3, "x": 6, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "instant": true, "expr": "count(count by (domain) (max by (domain) (last_over_time(domain_probe_success{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) == 1 and max by (domain) (last_over_time(domain_expiry_days{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) < 0)) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "< 14 days",
+          "gridPos": { "h": 4, "w": 3, "x": 9, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "instant": true, "expr": "count(count by (domain) (max by (domain) (last_over_time(domain_probe_success{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) == 1 and max by (domain) (last_over_time(domain_expiry_days{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) >= 0 and max by (domain) (last_over_time(domain_expiry_days{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) < 14)) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "< 60 days",
+          "gridPos": { "h": 4, "w": 3, "x": 12, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "instant": true, "expr": "count(count by (domain) (max by (domain) (last_over_time(domain_probe_success{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) == 1 and max by (domain) (last_over_time(domain_expiry_days{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) >= 14 and max by (domain) (last_over_time(domain_expiry_days{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) < 60)) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Min days left",
+          "gridPos": { "h": 4, "w": 3, "x": 15, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "instant": true, "expr": "min(max by (domain) (last_over_time(domain_expiry_days{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) and on(domain) max by (domain) (last_over_time(domain_probe_success{job=\"domain-exporter\",domain=~\"$domain\"}[2m])) == 1) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d",
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 14 }, { "color": "green", "value": 60 }] }
+            }
+          }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Firing domain alerts",
+          "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "instant": true, "expr": "count(count by (alertname, domain) (last_over_time(ALERTS{alertname=~\"DomainExpired|DomainExpiringCritical|DomainExpiringSoon|DomainProbeFailed\",alertstate=\"firing\"}[2m]))) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Exporter up",
+          "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "instant": true, "expr": "max(last_over_time(up{job=\"domain-exporter\"}[2m])) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 10,
+          "type": "table",
+          "title": "Registration expiry",
+          "description": "Дни до paid-till / Registry Expiry. Отрицательные — уже просрочен.",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 5 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "instant": true,
+              "expr": "label_replace(domain_probe_success{job=\"domain-exporter\",domain=~\"$domain\"}, \"col\", \"OK\", \"__name__\", \".*\") or label_replace(domain_expiry_days{job=\"domain-exporter\",domain=~\"$domain\"}, \"col\", \"Days\", \"__name__\", \".*\") or label_replace(domain_expiry_timestamp_seconds{job=\"domain-exporter\",domain=~\"$domain\"} * 1000, \"col\", \"Expiry\", \"__name__\", \".*\") or label_replace(domain_probe_duration_seconds{job=\"domain-exporter\",domain=~\"$domain\"}, \"col\", \"Probe s\", \"__name__\", \".*\")"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "sortBy": [{ "displayName": "Days", "desc": false }]
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "filterable": true, "align": "center" }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Domain" },
+                "properties": [
+                  { "id": "custom.align", "value": "left" },
+                  { "id": "custom.width", "value": 220 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "OK" },
+                "properties": [
+                  { "id": "custom.width", "value": 90 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "FAIL", "color": "red" }, "1": { "text": "OK", "color": "green" } } }] }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Days" },
+                "properties": [
+                  { "id": "unit", "value": "d" },
+                  { "id": "decimals", "value": 0 },
+                  { "id": "custom.width", "value": 120 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 14 }, { "color": "yellow", "value": 60 }, { "color": "green", "value": 90 }] } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Expiry" },
+                "properties": [
+                  { "id": "unit", "value": "dateTimeAsIso" },
+                  { "id": "custom.width", "value": 220 },
+                  { "id": "custom.align", "value": "left" }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Probe s" },
+                "properties": [
+                  { "id": "unit", "value": "s" },
+                  { "id": "decimals", "value": 2 },
+                  { "id": "custom.width", "value": 110 }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "filterFieldsByName",
+              "options": { "include": { "pattern": "/^(domain|col|Value)$/" } }
+            },
+            {
+              "id": "groupingToMatrix",
+              "options": { "columnField": "col", "rowField": "domain", "valueField": "Value" }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true },
+                "indexByName": { "domain": 0, "OK": 1, "Days": 2, "Expiry": 3, "Probe s": 4 },
+                "renameByName": { "domain": "Domain" }
+              }
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "type": "row",
+          "title": "History",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Days until expiry",
+          "gridPos": { "h": 9, "w": 16, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "max by (domain) (domain_expiry_days{job=\"domain-exporter\",domain=~\"$domain\"})", "legendFormat": "{{domain}}" }],
+          "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "asc" } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d",
+              "decimals": 0,
+              "custom": { "fillOpacity": 8, "lineWidth": 2, "spanNulls": true },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 14 }, { "color": "green", "value": 60 }] }
+            }
+          }
+        },
+        {
+          "id": 13,
+          "type": "state-timeline",
+          "title": "Lookup success",
+          "gridPos": { "h": 9, "w": 8, "x": 16, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "max by (domain) (domain_probe_success{job=\"domain-exporter\",domain=~\"$domain\"})", "legendFormat": "{{domain}}" }],
+          "options": {
+            "mergeValues": true,
+            "showValue": "never",
+            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "single" }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "FAIL", "color": "red" }, "1": { "text": "OK", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+              "custom": { "fillOpacity": 70, "lineWidth": 0, "spanNulls": true }
+            }
+          }
+        }
+      ]
+    }

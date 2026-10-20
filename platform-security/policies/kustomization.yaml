@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization.json
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 00-exceptions-node-agents.yaml
+  - 00-exceptions-monitoring.yaml
+  - 00-exceptions-sentry.yaml
+  - 00-exceptions-cert-manager.yaml
+  - 00-exceptions-redis.yaml
+  - 00-exceptions-gitlab-ci.yaml
+  - 01-pod-security-baseline.yaml
+  - 02-pod-security-restricted.yaml
+  - 03-disallow-latest-tag.yaml
+  - 04-disallow-default-namespace.yaml
+  - 05-require-requests.yaml
+  - 06-require-probes.yaml
+  - 07-limit-review-namespaces.yaml

@@ -1,0 +1,714 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMAlertmanagerConfig
+metadata:
+  name: default
+  namespace: monitoring
+  labels:
+    vmalertmanagerConfig: main
+spec:
+  route:
+    receiver: "null"
+    group_by:
+      - alertname
+      - cluster
+      - namespace
+      - node
+      - severity
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+    routes:
+      - matchers:
+          - alertname = HelmReleaseDeployed
+          - severity = info
+        receiver: k8s_info_zulip
+        group_by:
+          - alertname
+          - cluster
+          - namespace
+          - release
+          - revision
+        group_wait: 15s
+        group_interval: 1m
+        repeat_interval: 24h
+      # Топик «Домены»: первое сообщение сразу, повтор раз в сутки.
+      # group_interval короче repeat_interval, иначе проверка попадает в границу
+      # и повтор уходит через раз. 1h, а не 5m: смена состояния (снялся/снова
+      # сработал) тоже ждёт этот интервал, и короткий интервал засыпает топик.
+      - matchers:
+          - team = domains
+        receiver: domains_zulip
+        group_by:
+          - alertname
+          - domain
+          - mention
+        group_wait: 15s
+        group_interval: 1h
+        repeat_interval: 24h
+      # Иначе все peer одного балансера склеиваются в одно сообщение:
+      # общий маршрут uptime группирует только по alertname и instance.
+      - matchers:
+          - team = uptime
+          - alertname =~ "Angie.+"
+        receiver: uptime_zulip
+        group_by:
+          - alertname
+          - instance
+          - upstream
+        group_wait: 15s
+        group_interval: 5m
+        repeat_interval: 1h
+      - matchers:
+          - team = uptime
+        receiver: uptime_zulip
+        group_by:
+          - alertname
+          - instance
+        group_wait: 15s
+        group_interval: 5m
+        repeat_interval: 1h
+      # Kyverno audit-нарушения — это долгоживущий бэклог, а не инцидент:
+      # собираем дайджест на политику и не повторяем чаще раза в сутки.
+      - matchers:
+          - alertgroup = kyverno
+          - severity =~ "warning|error|critical"
+        receiver: k8s_alerts_zulip
+        group_by:
+          - alertname
+          - cluster
+          - policy
+        group_wait: 2m
+        group_interval: 15m
+        repeat_interval: 24h
+      - matchers:
+          - severity =~ "warning|error|critical"
+        receiver: k8s_alerts_zulip
+  inhibit_rules:
+    - source_matchers:
+        - severity = critical
+      target_matchers:
+        - severity = warning
+      equal:
+        - alertname
+        - namespace
+        - cluster
+    - source_matchers:
+        - alertname =~ "NodeUnavailable|KubeNodeNotReady|KubeNodeUnreachable"
+      target_matchers:
+        - alertname =~ "CiliumAgentUnhealthy|CiliumHighDropRate|CiliumHttpHighErrorRate|ServiceDown|KubeDaemonSetRolloutStuck|TooManyScrapeErrors|TooManyLogs|ReconcileErrors|LogErrors"
+      equal:
+        - cluster
+    - source_matchers:
+        - alertname =~ "NodeUnavailable|KubeNodeNotReady|KubeNodeUnreachable"
+      target_matchers:
+        - alertname =~ "NodePressure|NodeMemoryFillingUp"
+      equal:
+        - cluster
+        - node
+    - source_matchers:
+        - alertname = NodePressure
+        - condition = MemoryPressure
+      target_matchers:
+        - alertname = ContainerMemoryFillingUp
+      equal:
+        - cluster
+        - node
+    - source_matchers:
+        - alertname = PodOOMKilled
+      target_matchers:
+        - alertname = ContainerMemoryFillingUp
+      equal:
+        - cluster
+        - namespace
+        - pod
+        - container
+    - source_matchers:
+        - alertname = TechnitiumDnsOutage
+      target_matchers:
+        - alertname =~ "TechnitiumDnsInstanceDown|TechnitiumDnsZoneFailed|TechnitiumAdminDown|TechnitiumHighLatency|TechnitiumSoaSkew|TechnitiumServfailHigh|TechnitiumScrapeFailed"
+      equal:
+        - cluster
+    - source_matchers:
+        - alertname = TechnitiumDnsInstanceDown
+      target_matchers:
+        - alertname =~ "TechnitiumDnsZoneFailed|TechnitiumAdminDown|TechnitiumHighLatency|TechnitiumServfailHigh|TechnitiumScrapeFailed"
+      equal:
+        - cluster
+        - node
+    - source_matchers:
+        - alertname = PveNodeScrapeFailed
+      target_matchers:
+        - alertname =~ "Technitium.+"
+      equal:
+        - node
+    - source_matchers:
+        - alertname = DomainExpired
+      target_matchers:
+        - alertname =~ "DomainExpiringCritical|DomainExpiringSoon"
+      equal:
+        - domain
+    - source_matchers:
+        - alertname = DomainExpiringCritical
+      target_matchers:
+        - alertname = DomainExpiringSoon
+      equal:
+        - domain
+    - source_matchers:
+        - alertname = AngieScrapeFailed
+      target_matchers:
+        - alertname =~ "AngieUpstreamDown|AngieUpstreamPeerDown"
+      equal:
+        - cluster
+        - instance
+    - source_matchers:
+        - alertname = AngieUpstreamDown
+      target_matchers:
+        - alertname = AngieUpstreamPeerDown
+      equal:
+        - cluster
+        - instance
+        - upstream
+    - source_matchers:
+        - alertname = AngieVhostCertExpired
+      target_matchers:
+        - alertname =~ "AngieVhostDown|AngieVhostCertExpiring|AngieVhostSlow"
+      equal:
+        - cluster
+        - instance
+        - balancer
+    - source_matchers:
+        - alertname = AngieVhostDown
+      target_matchers:
+        - alertname = AngieVhost5xx
+      equal:
+        - balancer
+        - vhost
+  receivers:
+    - name: "null"
+    - name: 'k8s_info_zulip'
+      slack_configs:
+        - api_url:
+            name: zulip-webhook-info
+            key: url
+          send_resolved: false
+          color: '#2563eb'
+          title: '🚀 ДЕПЛОЙ · {{ .CommonLabels.alertname }}'
+          title_link: '{{ .ExternalURL }}'
+          fallback: '{{ .CommonLabels.alertname }} ({{ .Status }})'
+          mrkdwn_in:
+            - text
+            - pretext
+          text: |-
+            {{- $alert := index .Alerts 0 -}}
+            {{- $title := or .CommonAnnotations.summary $alert.Annotations.summary .CommonLabels.alertname -}}
+            🔵 **INFO**
+
+            **{{ $title }}**
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📊 **ДЕПЛОЙ**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- with .CommonLabels.cluster }}
+            🌐 **Cluster:** `{{ . }}`
+            {{- end }}
+            {{- with .CommonLabels.namespace }}
+            📦 **Namespace:** `{{ . }}`
+            {{- end }}
+            {{- with .CommonLabels.release }}
+            🏷️ **Release:** `{{ . }}`
+            {{- end }}
+            {{- with .CommonLabels.revision }}
+            🔢 **Revision:** `{{ . }}`
+            {{- end }}
+            {{- with .CommonLabels.helm_status }}
+            📌 **Helm status:** `{{ . }}`
+            {{- end }}
+            {{- with .CommonLabels.chart }}
+            📚 **Chart:** `{{ . }}`
+            {{- end }}
+            {{- with .CommonLabels.flux_helmrelease }}
+            ♻️ **Flux HelmRelease:** `{{ . }}`
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📝 **ЧТО ВЫШЛО**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- range $i, $a := .Alerts }}
+            {{- if lt $i 8 }}
+            {{- $w := or $a.Labels.workload $a.Labels.deployment $a.Labels.statefulset $a.Labels.daemonset $a.Labels.release }}
+            • {{ with $a.Labels.kind }}**{{ . }}** {{ end }}{{ if $w }}`{{ $w }}`{{ end }}{{ with $a.Labels.app }} · app `{{ . }}`{{ end }}{{ with $a.Labels.component }} · `{{ . }}`{{ end }}{{ with $a.Labels.version }} · version `{{ . }}`{{ end }}{{ with $a.Labels.app_version }} · app_version `{{ . }}`{{ end }}{{ with $a.Labels.chart }} · chart `{{ . }}`{{ end }}
+            {{- with $a.Labels.image }}
+              image: `{{ . }}`
+            {{- end }}
+            {{- $text := or $a.Annotations.description $a.Annotations.message }}
+            {{- if and $text (eq $a.Labels.kind "HelmRelease") }}
+              {{ $text }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if gt (len .Alerts) 8 }}
+            _показаны 8 из {{ len .Alerts }}_
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            🔗 **ДЕЙСТВИЯ**
+            ━━━━━━━━━━━━━━━━━━━━
+            👉 [Alertmanager]({{ .ExternalURL }})
+    # Native /external/alertmanager webhook only prints name+desc as a one-liner.
+    # slack_incoming accepts a templated Slack attachment; Zulip renders it as markdown.
+    - name: 'uptime_zulip'
+      slack_configs:
+        - api_url:
+            name: zulip-webhook-uptime
+            key: url
+          send_resolved: true
+          color: '{{ if eq .Status "resolved" }}good{{ else if eq .CommonLabels.severity "warning" }}warning{{ else }}danger{{ end }}'
+          title: |-
+            {{- if eq .Status "resolved" -}}🟢 UP{{- else if eq .CommonLabels.severity "warning" -}}🟠 WARN{{- else -}}🔴 DOWN{{- end -}}
+            · {{ .CommonLabels.alertname }}
+          title_link: '{{ .ExternalURL }}'
+          fallback: '{{ .CommonLabels.alertname }} ({{ .Status }})'
+          mrkdwn_in:
+            - text
+            - pretext
+          text: |-
+            {{- $alert := index .Alerts 0 -}}
+            {{- $title := or .CommonAnnotations.summary $alert.Annotations.summary .CommonLabels.alertname -}}
+            {{- if eq .Status "resolved" -}}
+            🟢 **UP**
+            {{- else if eq .CommonLabels.severity "warning" -}}
+            🟠 **WARNING**
+            {{- else -}}
+            🔴 **DOWN**
+            {{- end }}
+
+            **{{ $title }}**
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📊 **UPTIME**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- if .CommonLabels.vhost }}
+            🔗 **Vhost:** `{{ .CommonLabels.vhost }}`
+            {{- with .CommonLabels.balancer }}
+            🖥 **Балансер:** `{{ . }}`
+            {{- end }}
+            {{- else if match "^Angie" .CommonLabels.alertname }}
+            {{- with .CommonLabels.instance }}
+            🖥 **Балансер:** `{{ . }}`
+            {{- end }}
+            {{- with .CommonLabels.upstream }}
+            🔀 **Upstream:** `{{ . }}`
+            {{- end }}
+            {{- else }}
+            {{- with $alert.Labels.instance }}
+            🔗 **URL:** {{ . }}
+            {{- end }}
+            {{- end }}
+            📛 **Alert:** `{{ .CommonLabels.alertname }}`
+            🕒 **Начало:** `{{ $alert.StartsAt.Format "2006-01-02 15:04:05 MST" }}`
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📝 **ОПИСАНИЕ**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- range $i, $a := .Alerts }}
+            {{- if lt $i 5 }}
+            {{- $text := or $a.Annotations.description $a.Annotations.message }}
+            • {{ if $text }}{{ $text }}{{ else }}_нет описания_{{ end }}
+            {{- end }}
+            {{- end }}
+            {{- if gt (len .Alerts) 5 }}
+            _показаны 5 из {{ len .Alerts }}_
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            🔗 **ДЕЙСТВИЯ**
+            ━━━━━━━━━━━━━━━━━━━━
+            👉 [Alertmanager]({{ .ExternalURL }})
+            {{- if eq .Status "firing" }} · [🔇 Заглушить]({{ .ExternalURL }}/#/silences/new?filter=%7B{{- range $i, $p := .CommonLabels.SortedPairs }}{{- if $i }},{{ end }}{{ $p.Name }}%3D%22{{ $p.Value | urlquery | reReplaceAll "\\+" "%20" }}%22{{- end }}%7D){{ end }}
+            {{- if $alert.Annotations.dashboard }} · [📈 Dashboard]({{ $alert.Annotations.dashboard }}){{ else if $alert.GeneratorURL }} · [📊 Метрики]({{ $alert.GeneratorURL }}){{ end }}
+    - name: 'domains_zulip'
+      slack_configs:
+        - api_url:
+            name: zulip-webhook-domains
+            key: url
+          send_resolved: true
+          color: '{{ if eq .Status "resolved" }}good{{ else if eq .CommonLabels.severity "critical" }}danger{{ else }}warning{{ end }}'
+          title: |-
+            {{- $sev := .CommonLabels.severity -}}
+            {{- if eq .Status "firing" -}}🔥 СРАБОТАЛ{{- else -}}✅ СНЯТ{{- end -}}
+            {{- if $sev }} · {{ $sev | toUpper }}{{- end }} · {{ .CommonLabels.alertname }}
+          title_link: '{{ .ExternalURL }}'
+          fallback: '{{ .CommonLabels.alertname }} ({{ .Status }})'
+          mrkdwn_in:
+            - text
+            - pretext
+          text: |-
+            {{- $alert := index .Alerts 0 -}}
+            {{- $title := or .CommonAnnotations.summary $alert.Annotations.summary .CommonLabels.alertname -}}
+            {{- $sev := .CommonLabels.severity -}}
+            {{- if and (eq .Status "firing") (eq .CommonLabels.mention "true") }}
+            @**Заярных Михаил Юрьевич** @**Попов Виктор Владимирович** 
+            {{ end -}}
+            {{- if eq $sev "critical" -}}
+            🔴 **CRITICAL**
+            {{- else if eq $sev "warning" -}}
+            🟠 **WARNING**
+            {{- else if $sev -}}
+            ⚪️ **{{ $sev }}**
+            {{- else if eq .Status "firing" -}}
+            🔴 **FIRING**
+            {{- else -}}
+            🟢 **RESOLVED**
+            {{- end }}
+
+            **{{ $title }}**
+
+            ━━━━━━━━━━━━━━━━━━━━
+            🌐 **ДОМЕНЫ**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- with .CommonLabels.domain }}
+            🏷️ **Домен:** `{{ . }}`
+            {{- end }}
+            📛 **Alert:** `{{ .CommonLabels.alertname }}`
+            🕒 **Начало:** `{{ $alert.StartsAt.Format "2006-01-02 15:04:05 MST" }}`
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📝 **ОПИСАНИЕ**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- range $i, $a := .Alerts }}
+            {{- if lt $i 5 }}
+            {{- $text := or $a.Annotations.description $a.Annotations.message }}
+            • {{ if $text }}{{ $text }}{{ else }}_нет описания_{{ end }}
+            {{- end }}
+            {{- end }}
+            {{- if gt (len .Alerts) 5 }}
+            _показаны 5 из {{ len .Alerts }}_
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            🔗 **ДЕЙСТВИЯ**
+            ━━━━━━━━━━━━━━━━━━━━
+            👉 [Alertmanager]({{ .ExternalURL }})
+            {{- if eq .Status "firing" }} · [🔇 Заглушить]({{ .ExternalURL }}/#/silences/new?filter=%7B{{- range $i, $p := .CommonLabels.SortedPairs }}{{- if $i }},{{ end }}{{ $p.Name }}%3D%22{{ $p.Value | urlquery | reReplaceAll "\\+" "%20" }}%22{{- end }}%7D){{ end }}
+            {{- if $alert.Annotations.dashboard }} · [📈 Dashboard]({{ $alert.Annotations.dashboard }}){{ else if $alert.GeneratorURL }} · [📊 Метрики]({{ $alert.GeneratorURL }}){{ end }}
+    - name: 'k8s_alerts_zulip'
+      slack_configs:
+        - api_url:
+            name: zulip-webhook
+            key: url
+          send_resolved: true
+          color: '{{ if eq .Status "resolved" }}good{{ else if eq .CommonLabels.severity "critical" }}danger{{ else }}warning{{ end }}'
+          title: |-
+            {{- $sev := .CommonLabels.severity -}}
+            {{- if eq .Status "firing" -}}🔥 СРАБОТАЛ{{- else -}}✅ СНЯТ{{- end -}}
+            {{- if $sev }} · {{ $sev | toUpper }}{{- end }} · {{ .CommonLabels.alertname }}
+          title_link: '{{ .ExternalURL }}'
+          fallback: '{{ .CommonLabels.alertname }} ({{ .Status }})'
+          mrkdwn_in:
+            - text
+            - pretext
+          text: |-
+            {{- $alert := index .Alerts 0 -}}
+            {{- $isNodeAlert := match "^(NodeRebooted|NodeUnavailable|NodePressure|NodeMemoryFillingUp|KubeNodeNotReady|KubeNodeUnreachable|KubeNodeReadinessFlapping)$" .CommonLabels.alertname -}}
+            {{- $title := or .CommonAnnotations.summary $alert.Annotations.summary .CommonLabels.alertname -}}
+            {{- $sev := .CommonLabels.severity -}}
+            {{- if eq $sev "critical" -}}
+            🔴 **CRITICAL**
+            {{- else if eq $sev "warning" -}}
+            🟠 **WARNING**
+            {{- else if eq $sev "error" -}}
+            🟡 **ERROR**
+            {{- else if eq $sev "info" -}}
+            🔵 **INFO**
+            {{- else if $sev -}}
+            ⚪️ **{{ $sev }}**
+            {{- end }}
+
+            **{{ $title }}**
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📊 **ОСНОВНОЕ**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- with .CommonLabels.cluster }}
+            🌐 **Cluster:** `{{ . }}`
+            {{- end }}
+            {{- with $sev }}
+            🚨 **Severity:** `{{ . }}`
+            {{- end }}
+            📛 **Alert:** `{{ .CommonLabels.alertname }}`
+            {{- if not $isNodeAlert }}
+            {{- with .CommonLabels.namespace }}
+            📦 **Namespace:** `{{ . }}`
+            {{- end }}
+            {{- end }}
+            {{- $node := or $alert.Labels.node .CommonLabels.node -}}
+            {{- $instance := or $alert.Labels.instance .CommonLabels.instance -}}
+            {{- $pod := or $alert.Labels.pod .CommonLabels.pod -}}
+            {{- $sshHost := "" -}}
+            {{- if $node -}}
+            {{- $sshHost = $node -}}
+            {{- else if and $instance (not (match "^[0-9]" $instance)) -}}
+            {{- $sshHost = $instance -}}
+            {{- end -}}
+            {{- if $sshHost }}
+            🖥 **Node:** `{{ $sshHost }}`
+            🔑 **SSH:** [ssh {{ $sshHost }}.corp.example](ssh://{{ $sshHost }}.corp.example)
+            {{- end }}
+            {{- if and $pod (not $isNodeAlert) }}
+            🎯 **Pod:** `{{ $pod }}`
+            {{- end }}
+            {{- if and $instance (match "^[0-9]" $instance) }}
+            📡 **Target:** `{{ $instance }}`
+            {{- else if and $instance (not $pod) (not $sshHost) }}
+            🎯 **Target:** `{{ $instance }}`
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📈 **КОНТЕКСТ**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- if gt (len .Alerts) 1 }}
+            🧩 **Группа:** {{ len .Alerts }} alert(s)
+            {{- end }}
+            🕒 **Начало:** `{{ $alert.StartsAt.Format "2006-01-02 15:04:05 MST" }}`
+
+            {{- $extra := false -}}
+            {{- range .CommonLabels.SortedPairs -}}
+            {{- if not (or (eq .Name "alertname") (eq .Name "cluster") (eq .Name "namespace") (eq .Name "severity") (eq .Name "instance") (eq .Name "pod") (eq .Name "node") (eq .Name "job") (eq .Name "container") (eq .Name "endpoint") (eq .Name "prometheus") (eq .Name "service")) -}}
+            {{- $extra = true -}}
+            {{- end -}}
+            {{- end }}
+            {{- if $extra }}
+
+            ```spoiler Доп. labels
+            {{- range .CommonLabels.SortedPairs -}}
+            {{- if not (or (eq .Name "alertname") (eq .Name "cluster") (eq .Name "namespace") (eq .Name "severity") (eq .Name "instance") (eq .Name "pod") (eq .Name "node") (eq .Name "job") (eq .Name "container") (eq .Name "endpoint") (eq .Name "prometheus") (eq .Name "service")) }}
+            • **{{ .Name }}:** `{{ .Value }}`
+            {{- end -}}
+            {{- end }}
+            ```
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📝 **ОПИСАНИЕ**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- $desc := or $alert.Annotations.description $alert.Annotations.message -}}
+            {{- $sameDesc := true -}}
+            {{- range .Alerts -}}
+            {{- if ne (or .Annotations.description .Annotations.message) $desc -}}
+            {{- $sameDesc = false -}}
+            {{- end -}}
+            {{- end }}
+            {{- if $sameDesc }}
+            • {{ if $desc }}{{ $desc }}{{ else }}_нет описания_{{ end }}
+            {{- else }}
+            {{- range $i, $a := .Alerts }}
+            {{- if lt $i 5 }}
+            {{- $text := or $a.Annotations.description $a.Annotations.message }}
+            • {{ if $text }}{{ $text }}{{ else }}_нет описания_{{ end }}
+            {{- end }}
+            {{- end }}
+            {{- if gt (len .Alerts) 5 }}
+            _показаны 5 из {{ len .Alerts }}_
+            {{- end }}
+            {{- end }}
+
+            {{- /* Что именно затронуто: annotation item, иначе labels, отличающиеся внутри группы */ -}}
+            {{- $common := .CommonLabels -}}
+            {{- $skip := "^(alertname|alertgroup|cluster|severity|prometheus|job|endpoint|container|service|otel_scope_name)$" -}}
+            {{- $hasItems := false -}}
+            {{- range .Alerts -}}
+            {{- if .Annotations.item -}}
+            {{- $hasItems = true -}}
+            {{- end -}}
+            {{- range .Labels.SortedPairs -}}
+            {{- if and (not (index $common .Name)) (not (match $skip .Name)) -}}
+            {{- $hasItems = true -}}
+            {{- end -}}
+            {{- end -}}
+            {{- end }}
+            {{- if and $hasItems (gt (len .Alerts) 1) }}
+            {{- $shown := .Alerts -}}
+            {{- if gt (len .Alerts) 20 -}}
+            {{- $shown = slice .Alerts 0 20 -}}
+            {{- end -}}
+            {{- $nsSkip := "^(namespace|resource_namespace|exported_namespace)$" -}}
+            {{- /* Если namespace различается внутри группы — разбиваем список по namespace */ -}}
+            {{- $byNs := false -}}
+            {{- if not (or $common.namespace $common.resource_namespace $common.exported_namespace) -}}
+            {{- range $shown -}}
+            {{- if or .Labels.namespace .Labels.resource_namespace .Labels.exported_namespace -}}
+            {{- $byNs = true -}}
+            {{- end -}}
+            {{- end -}}
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            🧩 **ЗАТРОНУТО** ({{ len .Alerts }})
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- if $byNs }}
+            {{- range $i, $a := $shown }}
+            {{- $ns := or $a.Labels.namespace $a.Labels.resource_namespace $a.Labels.exported_namespace -}}
+            {{- $firstOfNs := true -}}
+            {{- range $j, $b := $shown -}}
+            {{- if and (lt $j $i) (eq (or $b.Labels.namespace $b.Labels.resource_namespace $b.Labels.exported_namespace) $ns) -}}
+            {{- $firstOfNs = false -}}
+            {{- end -}}
+            {{- end }}
+            {{- if $firstOfNs }}
+
+            📦 **{{ if $ns }}{{ $ns }}{{ else }}вне namespace{{ end }}**
+            {{- range $b := $shown }}
+            {{- if eq (or $b.Labels.namespace $b.Labels.resource_namespace $b.Labels.exported_namespace) $ns }}
+            {{- $show := false -}}
+            {{- range $p := $b.Labels.SortedPairs -}}
+            {{- if and (not (index $common $p.Name)) (not (match $skip $p.Name)) (not (match $nsSkip $p.Name)) -}}
+            {{- $show = true -}}
+            {{- end -}}
+            {{- end }}
+            {{- if $b.Annotations.item }}
+              • {{ $b.Annotations.item }}
+            {{- else if $show }}
+              • {{ $first := true }}{{ range $p := $b.Labels.SortedPairs }}{{ if and (not (index $common $p.Name)) (not (match $skip $p.Name)) (not (match $nsSkip $p.Name)) }}{{ if not $first }} · {{ end }}{{ $first = false }}**{{ $p.Name }}:** `{{ $p.Value }}`{{ end }}{{ end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- else }}
+            {{- range $a := $shown }}
+            {{- $show := false -}}
+            {{- range $p := $a.Labels.SortedPairs -}}
+            {{- if and (not (index $common $p.Name)) (not (match $skip $p.Name)) -}}
+            {{- $show = true -}}
+            {{- end -}}
+            {{- end }}
+            {{- if $a.Annotations.item }}
+            • {{ $a.Annotations.item }}
+            {{- else if $show }}
+            • {{ $first := true }}{{ range $p := $a.Labels.SortedPairs }}{{ if and (not (index $common $p.Name)) (not (match $skip $p.Name)) }}{{ if not $first }} · {{ end }}{{ $first = false }}**{{ $p.Name }}:** `{{ $p.Value }}`{{ end }}{{ end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if gt (len .Alerts) 20 }}
+
+            _показаны 20 из {{ len .Alerts }}_
+            {{- end }}
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            🔗 **ДЕЙСТВИЯ**
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- $gen := "" -}}
+            {{- if $alert.GeneratorURL -}}
+            {{- $gen = $alert.GeneratorURL | reReplaceAll "\\\\" "%5C" | reReplaceAll "\"" "%22" | reReplaceAll "\\{" "%7B" | reReplaceAll "\\}" "%7D" | reReplaceAll "\\|" "%7C" | reReplaceAll " " "%20" | reReplaceAll "\\(" "%28" | reReplaceAll "\\)" "%29" | reReplaceAll "\\[" "%5B" | reReplaceAll "\\]" "%5D" -}}
+            {{- end }}
+            👉 [Alertmanager]({{ .ExternalURL }})
+            {{- if eq .Status "firing" }} · [🔇 Заглушить]({{ .ExternalURL }}/#/silences/new?filter=%7B{{- range $i, $p := .CommonLabels.SortedPairs }}{{- if $i }},{{ end }}{{ $p.Name }}%3D%22{{ $p.Value | urlquery | reReplaceAll "\\+" "%20" }}%22{{- end }}%7D){{ end }}
+            {{- if $alert.Annotations.dashboard }} · [📈 Dashboard]({{ $alert.Annotations.dashboard }}){{ else if $gen }} · [📊 Метрики]({{ $gen }}){{ end }}
+    - name: telegram
+      telegram_configs:
+        - bot_token:
+            name: telegram-bot-token
+            key: token
+          chat_id: -1000000000001
+          parse_mode: HTML
+          send_resolved: true
+          message: |-
+            {{- $alert := index .Alerts 0 -}}
+            {{- $isNodeAlert := match "^(NodeRebooted|NodeUnavailable|NodePressure|NodeMemoryFillingUp|KubeNodeNotReady|KubeNodeUnreachable|KubeNodeReadinessFlapping)$" .CommonLabels.alertname -}}
+            {{- $title := or .CommonAnnotations.summary $alert.Annotations.summary .CommonLabels.alertname -}}
+            {{- $sev := .CommonLabels.severity -}}
+            {{- if eq .Status "firing" -}}
+            🔥 <b>СРАБОТАЛ</b>
+            {{- else -}}
+            ✅ <b>СНЯТ</b>
+            {{- end }}
+            {{- if eq $sev "critical" }}
+            🔴 <b>CRITICAL</b>
+            {{- else if eq $sev "warning" }}
+            🟠 <b>WARNING</b>
+            {{- else if eq $sev "error" }}
+            🟡 <b>ERROR</b>
+            {{- else if eq $sev "info" }}
+            🔵 <b>INFO</b>
+            {{- else if $sev }}
+            ⚪️ <b>{{ $sev | reReplaceAll "&" "&amp;" | reReplaceAll "<" "&lt;" | reReplaceAll ">" "&gt;" }}</b>
+            {{- end }}
+
+            <b>{{ $title | reReplaceAll "&" "&amp;" | reReplaceAll "<" "&lt;" | reReplaceAll ">" "&gt;" }}</b>
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📊 <b>ОСНОВНОЕ</b>
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- with .CommonLabels.cluster }}
+            🌐 <b>Cluster:</b> <code>{{ . }}</code>
+            {{- end }}
+            {{- with $sev }}
+            🚨 <b>Severity:</b> <code>{{ . }}</code>
+            {{- end }}
+            📛 <b>Alert:</b> <code>{{ .CommonLabels.alertname }}</code>
+            {{- if not $isNodeAlert }}
+            {{- with .CommonLabels.namespace }}
+            📦 <b>Namespace:</b> <code>{{ . }}</code>
+            {{- end }}
+            {{- end }}
+            {{- $node := or $alert.Labels.node .CommonLabels.node -}}
+            {{- $instance := or $alert.Labels.instance .CommonLabels.instance -}}
+            {{- $pod := or $alert.Labels.pod .CommonLabels.pod -}}
+            {{- $sshHost := "" -}}
+            {{- if $node -}}
+            {{- $sshHost = $node -}}
+            {{- else if and $instance (not (match "^[0-9]" $instance)) -}}
+            {{- $sshHost = $instance -}}
+            {{- end -}}
+            {{- if $sshHost }}
+            🖥 <b>Node:</b> <code>{{ $sshHost }}</code>
+            🔑 <b>SSH:</b> <code>ssh {{ $sshHost }}.corp.example</code>
+            {{- end }}
+            {{- if and $pod (not $isNodeAlert) }}
+            🎯 <b>Pod:</b> <code>{{ $pod }}</code>
+            {{- end }}
+            {{- if and $instance (match "^[0-9]" $instance) }}
+            📡 <b>Target:</b> <code>{{ $instance }}</code>
+            {{- else if and $instance (not $pod) (not $sshHost) }}
+            🎯 <b>Target:</b> <code>{{ $instance }}</code>
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📈 <b>КОНТЕКСТ</b>
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- if gt (len .Alerts) 1 }}
+            🧩 <b>Группа:</b> {{ len .Alerts }} alert(s)
+            {{- end }}
+            🕒 <b>Начало:</b> {{ $alert.StartsAt }}
+
+            🏷 <b>Доп. labels:</b>
+            {{- range .CommonLabels.SortedPairs -}}
+            {{- if not (or (eq .Name "alertname") (eq .Name "cluster") (eq .Name "namespace") (eq .Name "severity") (eq .Name "instance") (eq .Name "pod") (eq .Name "node") (eq .Name "job") (eq .Name "container") (eq .Name "endpoint") (eq .Name "prometheus") (eq .Name "service")) }}
+            • <b>{{ .Name }}</b>: <code>{{ .Value | reReplaceAll "&" "&amp;" | reReplaceAll "<" "&lt;" | reReplaceAll ">" "&gt;" }}</code>
+            {{- end -}}
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            📝 <b>ОПИСАНИЕ</b>
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- range $i, $a := .Alerts }}
+            {{- if lt $i 5 }}
+            {{- $text := or $a.Annotations.description $a.Annotations.message }}
+            • {{ if $text }}{{ $text | reReplaceAll "&" "&amp;" | reReplaceAll "<" "&lt;" | reReplaceAll ">" "&gt;" }}{{ else }}<i>нет описания</i>{{ end }}
+            {{- end }}
+            {{- end }}
+            {{- if gt (len .Alerts) 5 }}
+            <i>показаны 5 из {{ len .Alerts }}</i>
+            {{- end }}
+
+            ━━━━━━━━━━━━━━━━━━━━
+            🔗 <b>ДЕЙСТВИЯ</b>
+            ━━━━━━━━━━━━━━━━━━━━
+            {{- $gen := "" -}}
+            {{- if $alert.GeneratorURL -}}
+            {{- $gen = $alert.GeneratorURL | reReplaceAll "\\\\" "%5C" | reReplaceAll "\"" "%22" | reReplaceAll "\\{" "%7B" | reReplaceAll "\\}" "%7D" | reReplaceAll "\\|" "%7C" | reReplaceAll " " "%20" | reReplaceAll "\\(" "%28" | reReplaceAll "\\)" "%29" | reReplaceAll "\\[" "%5B" | reReplaceAll "\\]" "%5D" | reReplaceAll "&" "&amp;" -}}
+            {{- end }}
+            👉 <a href="{{ .ExternalURL }}">Alertmanager</a>
+            {{- if eq .Status "firing" }} · <a href="{{ .ExternalURL }}/#/silences/new?filter=%7B{{- range $i, $p := .CommonLabels.SortedPairs }}{{- if $i }},{{ end }}{{ $p.Name }}%3D%22{{ $p.Value | urlquery | reReplaceAll "\\+" "%20" }}%22{{- end }}%7D">🔇 Заглушить</a>{{ end }}
+            {{- if $alert.Annotations.dashboard }} · <a href="{{ $alert.Annotations.dashboard }}">📈 Dashboard</a>{{ else if $gen }} · <a href="{{ $gen }}">📊 Метрики</a>{{ end }}

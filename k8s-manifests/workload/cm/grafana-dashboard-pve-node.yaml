@@ -1,0 +1,425 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-pve-node
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: PVE
+data:
+  pve-node.json: |
+    {
+      "uid": "pve-node",
+      "title": "PVE VMs",
+      "description": "node_exporter на VM гипервизора (job=pve-node). Scrape по FQDN {vm}.{dns_zone}, instance — короткое имя. Клик по VM — Node Exporter Full.",
+      "tags": ["platform", "pve", "node-exporter"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "editable": true,
+      "graphTooltip": 1,
+      "fiscalYearStartMonth": 0,
+      "time": { "from": "now-6h", "to": "now" },
+      "timepicker": {
+        "refresh_intervals": ["30s", "1m", "5m", "10m"]
+      },
+      "links": [
+        {
+          "title": "Node Exporter Full",
+          "type": "link",
+          "icon": "dashboard",
+          "keepTime": true,
+          "targetBlank": false,
+          "url": "/d/rYdddlPWk?var-ds_prometheus=${datasource}&var-job=pve-node&var-cluster=${cluster}&${__url_time_range}"
+        }
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "victoriametrics-metrics-datasource",
+            "current": { "text": "VictoriaMetrics", "value": "VictoriaMetrics" },
+            "hide": 0
+          },
+          {
+            "name": "cluster",
+            "type": "query",
+            "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+            "query": "label_values(up{job=\"pve-node\"}, cluster)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "workload", "value": "workload" }
+          },
+          {
+            "name": "instance",
+            "label": "VM",
+            "type": "query",
+            "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+            "query": "label_values(up{job=\"pve-node\",cluster=~\"$cluster\"}, instance)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Overview",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Targets",
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(last_over_time(up{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}[5m])) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Down",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(last_over_time(up{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}[5m]) == 0) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "CPU max",
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "max(1 - avg by (instance) (rate(node_cpu_seconds_total{job=\"pve-node\",mode=\"idle\",cluster=~\"$cluster\",instance=~\"$instance\"}[5m])))" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.7 }, { "color": "red", "value": 0.9 }] }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "RAM max",
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "max(1 - node_memory_MemAvailable_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"} / node_memory_MemTotal_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"})" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.8 }, { "color": "red", "value": 0.9 }] }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Disk max",
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "max(1 - node_filesystem_avail_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint!~\"/boot.*|/efi.*\",device!~\"rootfs\",cluster=~\"$cluster\",instance=~\"$instance\"} / node_filesystem_size_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint!~\"/boot.*|/efi.*\",device!~\"rootfs\",cluster=~\"$cluster\",instance=~\"$instance\"})" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.85 }, { "color": "red", "value": 0.95 }] }
+            }
+          }
+        },
+        {
+          "id": 11,
+          "type": "stat",
+          "title": "Firing",
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(ALERTS{alertname=~\"PveNode.+\",alertstate=\"firing\",cluster=~\"$cluster\"}) or vector(0)" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "VMs",
+          "description": "Диск — mountpoint=/. Клик по VM открывает Node Exporter Full (job=pve-node, этот nodename/instance).",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 5 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{
+            "refId": "A",
+            "format": "table",
+            "instant": true,
+            "expr": "label_replace(last_over_time(up{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}[5m]), \"col\", \"Up\", \"__name__\", \".*\") or label_replace(1 - avg by (instance) (rate(node_cpu_seconds_total{job=\"pve-node\",mode=\"idle\",cluster=~\"$cluster\",instance=~\"$instance\"}[5m])), \"col\", \"CPU\", \"__name__\", \".*\") or label_replace(1 - node_memory_MemAvailable_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"} / node_memory_MemTotal_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}, \"col\", \"RAM\", \"__name__\", \".*\") or label_replace(node_memory_MemTotal_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"} - node_memory_MemAvailable_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}, \"col\", \"RAM used\", \"__name__\", \".*\") or label_replace(node_memory_MemAvailable_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}, \"col\", \"RAM avail\", \"__name__\", \".*\") or label_replace(1 - node_filesystem_avail_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint=\"/\",cluster=~\"$cluster\",instance=~\"$instance\"} / node_filesystem_size_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint=\"/\",cluster=~\"$cluster\",instance=~\"$instance\"}, \"col\", \"Disk\", \"__name__\", \".*\") or label_replace(node_filesystem_size_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint=\"/\",cluster=~\"$cluster\",instance=~\"$instance\"} - node_filesystem_avail_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint=\"/\",cluster=~\"$cluster\",instance=~\"$instance\"}, \"col\", \"Disk used\", \"__name__\", \".*\") or label_replace(node_filesystem_avail_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint=\"/\",cluster=~\"$cluster\",instance=~\"$instance\"}, \"col\", \"Disk free\", \"__name__\", \".*\")"
+          }],
+          "options": { "showHeader": true, "cellHeight": "sm" },
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "filterable": true, "align": "center" },
+              "links": [{ "title": "Node Exporter Full", "url": "/d/rYdddlPWk?var-ds_prometheus=${datasource}&var-job=pve-node&var-cluster=${cluster}&var-nodename=${__data.fields.VM}&var-node=${__data.fields.VM}&${__url_time_range}" }]
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "VM" },
+                "properties": [{ "id": "custom.align", "value": "left" }, { "id": "custom.width", "value": 220 }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Up" },
+                "properties": [
+                  { "id": "custom.width", "value": 80 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }] }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "CPU" },
+                "properties": [
+                  { "id": "unit", "value": "percentunit" },
+                  { "id": "decimals", "value": 0 },
+                  { "id": "custom.width", "value": 80 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.7 }, { "color": "red", "value": 0.9 }] } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "RAM" },
+                "properties": [
+                  { "id": "unit", "value": "percentunit" },
+                  { "id": "decimals", "value": 0 },
+                  { "id": "custom.width", "value": 80 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.8 }, { "color": "red", "value": 0.9 }] } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "RAM used" },
+                "properties": [{ "id": "unit", "value": "bytes" }, { "id": "decimals", "value": 1 }, { "id": "custom.width", "value": 110 }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "RAM avail" },
+                "properties": [{ "id": "unit", "value": "bytes" }, { "id": "decimals", "value": 1 }, { "id": "custom.width", "value": 110 }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Disk" },
+                "properties": [
+                  { "id": "unit", "value": "percentunit" },
+                  { "id": "decimals", "value": 0 },
+                  { "id": "custom.width", "value": 80 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.85 }, { "color": "red", "value": 0.95 }] } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Disk used" },
+                "properties": [{ "id": "unit", "value": "bytes" }, { "id": "decimals", "value": 1 }, { "id": "custom.width", "value": 110 }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Disk free" },
+                "properties": [{ "id": "unit", "value": "bytes" }, { "id": "decimals", "value": 1 }, { "id": "custom.width", "value": 110 }]
+              }
+            ]
+          },
+          "transformations": [
+            { "id": "filterFieldsByName", "options": { "include": { "pattern": "/^(instance|col|Value)$/" } } },
+            { "id": "groupingToMatrix", "options": { "columnField": "col", "rowField": "instance", "valueField": "Value" } },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true },
+                "indexByName": { "instance": 0, "Up": 1, "CPU": 2, "RAM": 3, "RAM used": 4, "RAM avail": 5, "Disk": 6, "Disk used": 7, "Disk free": 8 },
+                "renameByName": { "instance": "VM" }
+              }
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "CPU",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "1 - avg by (instance) (rate(node_cpu_seconds_total{job=\"pve-node\",mode=\"idle\",cluster=~\"$cluster\",instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}}" }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "custom": { "fillOpacity": 10, "lineWidth": 1 },
+              "links": [{ "title": "Node Exporter Full", "url": "/d/rYdddlPWk?var-ds_prometheus=${datasource}&var-job=pve-node&var-cluster=${cluster}&var-nodename=${__field.labels.instance}&var-node=${__field.labels.instance}&${__url_time_range}" }]
+            }
+          }
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "RAM used %",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "1 - node_memory_MemAvailable_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"} / node_memory_MemTotal_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}", "legendFormat": "{{instance}}" }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "custom": { "fillOpacity": 10, "lineWidth": 1 },
+              "links": [{ "title": "Node Exporter Full", "url": "/d/rYdddlPWk?var-ds_prometheus=${datasource}&var-job=pve-node&var-cluster=${cluster}&var-nodename=${__field.labels.instance}&var-node=${__field.labels.instance}&${__url_time_range}" }]
+            }
+          }
+        },
+        {
+          "id": 16,
+          "type": "timeseries",
+          "title": "RAM",
+          "description": "Used = Total − MemAvailable. Клик по серии — Node Exporter Full.",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "node_memory_MemTotal_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"} - node_memory_MemAvailable_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}", "legendFormat": "{{instance}} used" },
+            { "refId": "B", "expr": "node_memory_MemAvailable_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}", "legendFormat": "{{instance}} avail" },
+            { "refId": "C", "expr": "node_memory_MemTotal_bytes{job=\"pve-node\",cluster=~\"$cluster\",instance=~\"$instance\"}", "legendFormat": "{{instance}} total" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "decimals": 1,
+              "min": 0,
+              "custom": { "fillOpacity": 10, "lineWidth": 1 },
+              "links": [{ "title": "Node Exporter Full", "url": "/d/rYdddlPWk?var-ds_prometheus=${datasource}&var-job=pve-node&var-cluster=${cluster}&var-nodename=${__field.labels.instance}&var-node=${__field.labels.instance}&${__url_time_range}" }]
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byRegexp", "options": "/total$/" },
+                "properties": [{ "id": "custom.fillOpacity", "value": 0 }, { "id": "custom.lineWidth", "value": 1 }]
+              }
+            ]
+          }
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Disk used %",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "1 - node_filesystem_avail_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint!~\"/boot.*|/efi.*\",device!~\"rootfs\",cluster=~\"$cluster\",instance=~\"$instance\"} / node_filesystem_size_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint!~\"/boot.*|/efi.*\",device!~\"rootfs\",cluster=~\"$cluster\",instance=~\"$instance\"}", "legendFormat": "{{instance}} {{mountpoint}}" }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "custom": { "fillOpacity": 10, "lineWidth": 1 },
+              "links": [{ "title": "Node Exporter Full", "url": "/d/rYdddlPWk?var-ds_prometheus=${datasource}&var-job=pve-node&var-cluster=${cluster}&var-nodename=${__field.labels.instance}&var-node=${__field.labels.instance}&${__url_time_range}" }]
+            }
+          }
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Disk space",
+          "description": "Used / available / size по mountpoint (без /boot).",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "node_filesystem_size_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint!~\"/boot.*|/efi.*\",device!~\"rootfs\",cluster=~\"$cluster\",instance=~\"$instance\"} - node_filesystem_avail_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint!~\"/boot.*|/efi.*\",device!~\"rootfs\",cluster=~\"$cluster\",instance=~\"$instance\"}", "legendFormat": "{{instance}} {{mountpoint}} used" },
+            { "refId": "B", "expr": "node_filesystem_avail_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint!~\"/boot.*|/efi.*\",device!~\"rootfs\",cluster=~\"$cluster\",instance=~\"$instance\"}", "legendFormat": "{{instance}} {{mountpoint}} avail" },
+            { "refId": "C", "expr": "node_filesystem_size_bytes{job=\"pve-node\",fstype=~\"ext4|xfs|btrfs\",mountpoint!~\"/boot.*|/efi.*\",device!~\"rootfs\",cluster=~\"$cluster\",instance=~\"$instance\"}", "legendFormat": "{{instance}} {{mountpoint}} size" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "decimals": 1,
+              "min": 0,
+              "custom": { "fillOpacity": 10, "lineWidth": 1 },
+              "links": [{ "title": "Node Exporter Full", "url": "/d/rYdddlPWk?var-ds_prometheus=${datasource}&var-job=pve-node&var-cluster=${cluster}&var-nodename=${__field.labels.instance}&var-node=${__field.labels.instance}&${__url_time_range}" }]
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byRegexp", "options": "/size$/" },
+                "properties": [{ "id": "custom.fillOpacity", "value": 0 }]
+              }
+            ]
+          }
+        },
+        {
+          "id": 13,
+          "type": "row",
+          "title": "Network",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 }
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Network Traffic",
+          "description": "Тот же запрос, что Network Traffic в Node Exporter Full. Сравнивайте одну VM: у dns/balancer два NIC (eth0 и eth1), Full показывает их отдельно.",
+          "gridPos": { "h": 8, "w": 16, "x": 0, "y": 38 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "rate(node_network_receive_bytes_total{instance=~\"$instance\",job=\"pve-node\",cluster=~\"$cluster\"}[$__rate_interval]) * 8", "legendFormat": "{{instance}} {{device}} - Rx in" },
+            { "refId": "B", "expr": "rate(node_network_transmit_bytes_total{instance=~\"$instance\",job=\"pve-node\",cluster=~\"$cluster\"}[$__rate_interval]) * 8", "legendFormat": "{{instance}} {{device}} - Tx out" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bps",
+              "custom": { "fillOpacity": 40, "lineWidth": 1, "axisLabel": "out (-) / in (+)" },
+              "links": [{ "title": "Node Exporter Full", "url": "/d/rYdddlPWk?var-ds_prometheus=${datasource}&var-job=pve-node&var-cluster=${cluster}&var-nodename=${__field.labels.instance}&var-node=${__field.labels.instance}&${__url_time_range}" }]
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byRegexp", "options": "/.*out.*/" },
+                "properties": [{ "id": "custom.transform", "value": "negative-Y" }]
+              }
+            ]
+          }
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Errors / drops",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 38 },
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "rate(node_network_receive_errs_total{instance=~\"$instance\",job=\"pve-node\",cluster=~\"$cluster\"}[$__rate_interval])", "legendFormat": "{{instance}} {{device}} - Rx in" },
+            { "refId": "B", "expr": "rate(node_network_transmit_errs_total{instance=~\"$instance\",job=\"pve-node\",cluster=~\"$cluster\"}[$__rate_interval])", "legendFormat": "{{instance}} {{device}} - Tx out" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "custom": { "fillOpacity": 10, "lineWidth": 1, "axisLabel": "out (-) / in (+)" },
+              "links": [{ "title": "Node Exporter Full", "url": "/d/rYdddlPWk?var-ds_prometheus=${datasource}&var-job=pve-node&var-cluster=${cluster}&var-nodename=${__field.labels.instance}&var-node=${__field.labels.instance}&${__url_time_range}" }]
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byRegexp", "options": "/.*out.*/" },
+                "properties": [{ "id": "custom.transform", "value": "negative-Y" }]
+              }
+            ]
+          }
+        }
+      ]
+    }

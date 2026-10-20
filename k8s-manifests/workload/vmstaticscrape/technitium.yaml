@@ -1,0 +1,34 @@
+# Technitium v15+ Prometheus text at /api/dashboard/metrics/text (Bearer, Dashboard: View).
+# Host metrics stay on job=pve-node. Names are generic (total_queries) — prefix them.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMStaticScrape
+metadata:
+  name: technitium
+  namespace: monitoring
+spec:
+  jobName: technitium
+  targetEndpoints:
+    - targets:
+        - dns-1.corp.example:5380
+        - dns-2.corp.example:5380
+      scheme: http
+      path: /api/dashboard/metrics/text
+      interval: 30s
+      scrapeTimeout: 10s
+      authorization:
+        type: Bearer
+        credentials:
+          name: technitium-api-token
+          key: api-token
+      relabelConfigs:
+        - targetLabel: job
+          replacement: technitium
+        - sourceLabels: [__address__]
+          regex: (dns-[0-9]+).*
+          replacement: $1
+          targetLabel: instance
+      metricRelabelConfigs:
+        - sourceLabels: [__name__]
+          regex: (.+)
+          replacement: technitium_$1
+          targetLabel: __name__

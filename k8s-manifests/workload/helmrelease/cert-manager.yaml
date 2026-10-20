@@ -1,0 +1,50 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+spec:
+  interval: 30m
+  chartRef:
+    kind: OCIRepository
+    name: jetstack
+    namespace: flux-system
+  targetNamespace: cert-manager
+  install:
+    createNamespace: true
+  upgrade:
+    crds: CreateReplace
+  values:
+    crds:
+      enabled: true
+    global:
+      priorityClassName: platform-critical
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+    webhook:
+      replicaCount: 2
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+    cainjector:
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+    prometheus:
+      enabled: true
+      servicemonitor:
+        enabled: false
+    extraArgs:
+      - --dns01-recursive-nameservers-only
+      - --dns01-recursive-nameservers=188.75.228.19:53,95.170.134.107:53

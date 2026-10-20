@@ -1,0 +1,6 @@
+# Management-кластер доступен только из этого репозитория.
+user_access:
+  access_as:
+    agent: {}
+  projects:
+    - id: platform/gitops

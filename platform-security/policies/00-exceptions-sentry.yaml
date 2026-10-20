@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/kyverno.io/policyexception_v2.json
+# getsentry images start as root and gosu to uid 999 (sentry) / 1000 (taskbroker).
+# Chart has no global securityContext; forcing runAsNonRoot without per-image
+# UIDs and fsGroup on emptyDir/PVC would take down web and taskbroker.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: sentry-restricted
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: pod-security-restricted
+      ruleNames:
+        - restricted
+        - autogen-restricted
+        - autogen-cronjob-restricted
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - Deployment
+            - ReplicaSet
+            - StatefulSet
+            - DaemonSet
+            - Job
+            - CronJob
+          namespaces:
+            - sentry
+  podSecurity:
+    - controlName: Running as Non-root
+      images:
+        - "*"
+    - controlName: Running as Non-root user
+      images:
+        - "*"
+    - controlName: Privilege Escalation
+      images:
+        - "*"
+    - controlName: Capabilities
+      images:
+        - "*"
+    - controlName: Seccomp
+      images:
+        - "*"
+---
+# Kafka/snuba/task workers only expose exec liveness (or none). Chart has no
+# readinessProbe for those templates; HTTP readiness would be a no-op (no Service).
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: sentry-workers-probes
+  namespace: kyverno
+spec:
+  background: true
+  exceptions:
+    - policyName: require-probes
+      ruleNames:
+        - validate-probes
+  match:
+    any:
+      - resources:
+          kinds:
+            - Deployment
+            - StatefulSet
+          namespaces:
+            - sentry
+          names:
+            - sentry-ingest-*
+            - sentry-process-*
+            - sentry-post-process-*
+            - sentry-generic-metrics-consumer
+            - sentry-metrics-consumer
+            - sentry-snuba-*
+            - sentry-task*
+            - sentry-symbolicator-api
+

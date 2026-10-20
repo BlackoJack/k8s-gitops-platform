@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmselect-prometheus
+  namespace: cattle-monitoring-system
+  labels:
+    app.kubernetes.io/name: vmselect-prometheus
+    app.kubernetes.io/part-of: rancher-monitoring-dashboards
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vmselect-prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vmselect-prometheus
+        app.kubernetes.io/part-of: rancher-monitoring-dashboards
+    spec:
+      nodeSelector:
+        environment: infra
+      tolerations:
+        - key: environment
+          operator: Equal
+          value: infra
+          effect: PreferNoSchedule
+      securityContext:
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        runAsNonRoot: true
+      containers:
+        - name: nginx
+          image: rancher/mirrored-library-nginx:1.31.2-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - nginx
+            - -g
+            - daemon off;
+            - -c
+            - /nginx/nginx.conf
+          ports:
+            - name: http
+              containerPort: 9090
+              protocol: TCP
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /nginx
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/nginx
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: vmselect-prometheus-nginx
+            items:
+              - key: nginx.conf
+                path: nginx.conf
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}

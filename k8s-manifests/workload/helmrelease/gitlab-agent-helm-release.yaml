@@ -1,0 +1,48 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: gitlab-agent
+  namespace: flux-system
+spec:
+  chart:
+    spec:
+      chart: gitlab-agent
+      reconcileStrategy: ChartVersion
+      sourceRef:
+        kind: HelmRepository
+        name: gitlab
+        namespace: flux-system
+  install:
+    createNamespace: true
+  interval: 1m0s
+  releaseName: gitlab-agent
+  storageNamespace: gitlab-agent
+  targetNamespace: gitlab-agent
+  values:
+    config:
+      kasAddress: wss://gitlab.corp.example/-/kubernetes-agent/
+      secretName: gitlab-agent-token
+      observability:
+        enabled: true
+    # agentk is distroless/nonroot (65532). Chart example uses the same fields.
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 65532
+      seccompProfile:
+        type: RuntimeDefault
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 128Mi

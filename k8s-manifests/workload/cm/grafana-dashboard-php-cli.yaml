@@ -1,0 +1,258 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-php-cli
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: PHP
+data:
+  php-cli.json: |
+    {
+      "uid": "php-cli",
+      "title": "PHP CLI",
+      "description": "Cron PHP (php-cli-exporter). Текущий RSS обнуляется после выхода, peak и счётчик держатся 15 минут. memory_limit — из cron.ini.",
+      "tags": ["platform", "php", "php-cli"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "editable": true,
+      "graphTooltip": 1,
+      "time": { "from": "now-6h", "to": "now" },
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "dashboard",
+          "keepTime": true,
+          "title": "PHP-FPM",
+          "type": "link",
+          "url": "/d/php-fpm"
+        },
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "targetBlank": true,
+          "title": "Alertmanager",
+          "type": "link",
+          "url": "https://alertmanager.msk.corp.example"
+        }
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": { "text": "VictoriaMetrics Prometheus", "value": "VictoriaMetricsProm" },
+            "hide": 0
+          },
+          {
+            "name": "cluster",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(php_cli_up, cluster)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "namespace",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(php_cli_up{cluster=~\"$cluster\"}, namespace)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "pod",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(php_cli_up{cluster=~\"$cluster\",namespace=~\"$namespace\"}, pod)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "command",
+            "label": "Command",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(php_cli_processes{cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"}, command)",
+            "refresh": 2,
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
+            "sort": 1,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Overview",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Exporter",
+          "description": "up{job=\"php-cli\"}. Алерт PhpCliExporterDown.",
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "min by (namespace, pod) (up{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "{{namespace}}/{{pod}}" }],
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Processes",
+          "description": "Сумма php CLI в поде. 0, если экспортер жив, а процессов нет.",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "sum by (namespace, pod) (php_cli_processes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",command=~\"$command\"}) or (php_cli_up{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"} * 0)", "legendFormat": "{{namespace}}/{{pod}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "decimals": 0 } }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Commands",
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count by (namespace, pod) (php_cli_processes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",command=~\"$command\"}) or (php_cli_up{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"} * 0)", "legendFormat": "{{namespace}}/{{pod}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "decimals": 0 } }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "RSS / limit",
+          "description": "Крупнейший RSS в поде к memory_limit. Алерт PhpCliMemoryHigh — выше 80% пять минут.",
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "max by (namespace, pod) (php_cli_memory_rss_max_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"}) / on (namespace, pod) php_cli_memory_limit_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"}", "legendFormat": "{{namespace}}/{{pod}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.8 }, { "color": "red", "value": 0.9 }] }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Max RSS",
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "php_cli_memory_rss_max_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"}", "legendFormat": "{{namespace}}/{{pod}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "unit": "bytes", "decimals": 0 } }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "memory_limit",
+          "description": "cron.ini. Команды с ini_set(memory_limit, -1) этот потолок не соблюдают.",
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "php_cli_memory_limit_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"}", "legendFormat": "{{namespace}}/{{pod}}" }],
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": { "defaults": { "unit": "bytes", "decimals": 0 } }
+        },
+        {
+          "id": 8,
+          "type": "row",
+          "title": "Memory",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "RSS",
+          "description": "now — текущий RSS, peak — максимум за последние 15 минут. Линия — memory_limit.",
+          "gridPos": { "h": 8, "w": 14, "x": 0, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "php_cli_memory_rss_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",command=~\"$command\"}", "legendFormat": "{{namespace}}/{{pod}} {{command}} now" },
+            { "refId": "B", "expr": "php_cli_memory_rss_peak_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",command=~\"$command\"}", "legendFormat": "{{namespace}}/{{pod}} {{command}} peak" },
+            { "refId": "C", "expr": "php_cli_memory_limit_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"}", "legendFormat": "{{namespace}}/{{pod}} limit" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 10, "lineWidth": 1 } } }
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "RSS / memory_limit",
+          "description": "Красная линия — 80%, порог PhpCliMemoryHigh.",
+          "gridPos": { "h": 8, "w": 10, "x": 14, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "php_cli_memory_rss_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",command=~\"$command\"} / on (namespace, pod) group_left() php_cli_memory_limit_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"}", "legendFormat": "{{namespace}}/{{pod}} {{command}} now" },
+            { "refId": "B", "expr": "php_cli_memory_rss_peak_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",command=~\"$command\"} / on (namespace, pod) group_left() php_cli_memory_limit_bytes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\"}", "legendFormat": "{{namespace}}/{{pod}} {{command}} peak" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "custom": { "fillOpacity": 10, "lineWidth": 1, "thresholdsStyle": { "mode": "line" } },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.8 }] }
+            }
+          }
+        },
+        {
+          "id": 11,
+          "type": "row",
+          "title": "Processes",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 }
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Processes by command",
+          "description": "Имя команды — аргумент после artisan. После выхода счётчик ещё 15 минут равен 0.",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "refId": "A", "expr": "php_cli_processes{job=\"php-cli\",cluster=~\"$cluster\",namespace=~\"$namespace\",pod=~\"$pod\",command=~\"$command\"}", "legendFormat": "{{namespace}}/{{pod}} {{command}}" }
+          ],
+          "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 40, "lineWidth": 1, "stacking": { "mode": "normal" } } } }
+        },
+        {
+          "id": 13,
+          "type": "stat",
+          "title": "Firing PHP CLI alerts",
+          "gridPos": { "h": 4, "w": 24, "x": 0, "y": 23 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [{ "refId": "A", "expr": "count(ALERTS{alertname=~\"PhpCli.+\",alertstate=\"firing\"}) or vector(0)", "legendFormat": "firing" }],
+          "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            }
+          }
+        }
+      ]
+    }

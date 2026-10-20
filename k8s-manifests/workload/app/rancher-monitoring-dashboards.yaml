@@ -1,0 +1,24 @@
+# Rancher Cluster Explorer looks up catalog.cattle.io Apps
+# cattle-monitoring-system/rancher-monitoring-dashboards (then rancher-monitoring).
+# Flux HelmRelease is not that CR.
+apiVersion: catalog.cattle.io/v1
+kind: App
+metadata:
+  name: rancher-monitoring-dashboards
+  namespace: cattle-monitoring-system
+spec:
+  name: rancher-monitoring-dashboards
+  namespace: cattle-monitoring-system
+  version: 1
+  info:
+    status: deployed
+  chart:
+    metadata:
+      name: rancher-monitoring-dashboards
+      version: 110.0.0+up0.1.2
+      annotations:
+        catalog.cattle.io/certified: rancher
+        catalog.cattle.io/display-name: Monitoring Dashboards
+        catalog.cattle.io/ui-component: rancher-monitoring-dashboards
+        catalog.cattle.io/release-name: rancher-monitoring-dashboards
+        catalog.cattle.io/namespace: cattle-monitoring-system

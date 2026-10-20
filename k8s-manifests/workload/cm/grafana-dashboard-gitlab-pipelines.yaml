@@ -1,0 +1,3530 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-gitlab-pipelines
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: GitLab
+data:
+  gitlab-pipelines.json: |
+    {
+      "uid": "gitlab-pipelines",
+      "title": "GitLab pipelines",
+      "description": "Пайплайны и jobs gitlab.corp.example через REST/GraphQL. У platform/gitops своего CI нет. Для примера откройте platform/images, platform/config или apps/backend. Раннеры — на дашборде GitLab.",
+      "tags": [
+        "platform",
+        "gitlab",
+        "ci",
+        "pipeline"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "targetBlank": true,
+          "title": "GitLab",
+          "type": "link",
+          "url": "https://gitlab.corp.example/${project}"
+        },
+        {
+          "asDropdown": false,
+          "icon": "dashboard",
+          "targetBlank": false,
+          "title": "GitLab infra",
+          "type": "link",
+          "url": "/d/gitlab"
+        },
+        {
+          "asDropdown": false,
+          "icon": "external",
+          "targetBlank": true,
+          "title": "Alertmanager",
+          "type": "link",
+          "url": "https://alertmanager.msk.corp.example"
+        }
+      ],
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "gitlab",
+            "label": "GitLab API",
+            "type": "datasource",
+            "query": "yesoreyeram-infinity-datasource",
+            "current": {
+              "text": "GitLab",
+              "value": "gitlab-api"
+            },
+            "hide": 0
+          },
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "text": "VictoriaMetrics Prometheus",
+              "value": "VictoriaMetricsProm"
+            },
+            "hide": 2
+          },
+          {
+            "name": "project",
+            "label": "Project",
+            "type": "query",
+            "datasource": {
+              "type": "yesoreyeram-infinity-datasource",
+              "uid": "${gitlab}"
+            },
+            "refresh": 1,
+            "includeAll": false,
+            "multi": false,
+            "sort": 1,
+            "current": {
+              "text": "platform/images",
+              "value": "platform/images"
+            },
+            "query": {
+              "refId": "variable",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "membership",
+                    "value": "true"
+                  },
+                  {
+                    "key": "simple",
+                    "value": "true"
+                  },
+                  {
+                    "key": "archived",
+                    "value": "false"
+                  },
+                  {
+                    "key": "order_by",
+                    "value": "last_activity_at"
+                  },
+                  {
+                    "key": "sort",
+                    "value": "desc"
+                  },
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "path_with_namespace",
+                  "text": "path_with_namespace",
+                  "type": "string"
+                }
+              ],
+              "filters": []
+            }
+          },
+          {
+            "name": "status",
+            "label": "Status",
+            "type": "custom",
+            "query": ".* : All, failed : failed, success : success, running : running, pending : pending, canceled : canceled, skipped : skipped, manual : manual",
+            "includeAll": false,
+            "multi": false,
+            "current": {
+              "text": "All",
+              "value": ".*"
+            }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 16,
+          "type": "row",
+          "title": "По проектам",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": 17,
+          "type": "table",
+          "title": "Последний пайплайн по проектам",
+          "description": "GraphQL: 50 проектов с membership. Пустые (без CI, как k8s-mgmt) скрыты. Клик — GitLab. Не зависит от Project.",
+          "gridPos": {
+            "h": 12,
+            "w": 24,
+            "x": 0,
+            "y": 1
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "graphql",
+              "source": "url",
+              "format": "table",
+              "parser": "jq-backend",
+              "url": "https://gitlab.corp.example/api/graphql",
+              "url_options": {
+                "method": "POST",
+                "data": "",
+                "headers": [],
+                "params": [],
+                "body_type": "graphql",
+                "body_graphql_query": "query { projects(membership: true, first: 50, sort: \"latest_activity_desc\") { nodes { fullPath webUrl pipelines(first: 1) { nodes { iid status duration ref source createdAt user { username } } } } } }"
+              },
+              "root_selector": ".data.projects.nodes | map(select(.pipelines.nodes | length > 0) | {\n  project: .fullPath,\n  webUrl: .webUrl,\n  status: ((.pipelines.nodes[0].status // \"\") | ascii_downcase),\n  iid: .pipelines.nodes[0].iid,\n  duration: .pipelines.nodes[0].duration,\n  ref: .pipelines.nodes[0].ref,\n  source: ((.pipelines.nodes[0].source // \"\") | ascii_downcase),\n  createdAt: .pipelines.nodes[0].createdAt,\n  pipelineUrl: (.webUrl + \"/-/pipelines/\" + (.pipelines.nodes[0].iid | tostring)),\n  user: (.pipelines.nodes[0].user.username // \"\")\n})",
+              "columns": [
+                {
+                  "selector": "project",
+                  "text": "project",
+                  "type": "string"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "iid",
+                  "text": "pipeline",
+                  "type": "number"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "source",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "user",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "createdAt",
+                  "text": "created",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "pipelineUrl",
+                  "text": "pipelineUrl",
+                  "type": "string"
+                },
+                {
+                  "selector": "webUrl",
+                  "text": "webUrl",
+                  "type": "string"
+                }
+              ],
+              "filters": []
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "countRows": true,
+              "reducer": [
+                "count"
+              ]
+            },
+            "sortBy": [
+              {
+                "displayName": "created",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "filterByValue",
+              "options": {
+                "filters": [
+                  {
+                    "fieldName": "status",
+                    "config": {
+                      "id": "regex",
+                      "options": {
+                        "value": "^${status}$"
+                      }
+                    }
+                  }
+                ],
+                "type": "include",
+                "match": "all"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true,
+                "align": "left"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "status"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "solid"
+                    }
+                  },
+                  {
+                    "id": "custom.filterable",
+                    "value": true
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "created": {
+                            "text": "created",
+                            "color": "yellow"
+                          },
+                          "waiting_for_resource": {
+                            "text": "waiting",
+                            "color": "orange"
+                          },
+                          "preparing": {
+                            "text": "preparing",
+                            "color": "blue"
+                          },
+                          "pending": {
+                            "text": "pending",
+                            "color": "yellow"
+                          },
+                          "running": {
+                            "text": "running",
+                            "color": "blue"
+                          },
+                          "success": {
+                            "text": "success",
+                            "color": "green"
+                          },
+                          "failed": {
+                            "text": "failed",
+                            "color": "red"
+                          },
+                          "canceling": {
+                            "text": "canceling",
+                            "color": "purple"
+                          },
+                          "canceled": {
+                            "text": "canceled",
+                            "color": "purple"
+                          },
+                          "skipped": {
+                            "text": "skipped",
+                            "color": "text"
+                          },
+                          "manual": {
+                            "text": "manual",
+                            "color": "orange"
+                          },
+                          "scheduled": {
+                            "text": "scheduled",
+                            "color": "blue"
+                          },
+                          "waiting_for_callback": {
+                            "text": "callback",
+                            "color": "orange"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "project"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Project",
+                        "url": "${__data.fields.webUrl}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "pipeline"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Pipeline",
+                        "url": "${__data.fields.pipelineUrl}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "duration"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "yellow",
+                          "value": 300
+                        },
+                        {
+                          "color": "orange",
+                          "value": 900
+                        },
+                        {
+                          "color": "red",
+                          "value": 1800
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "created"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "dateTimeFromNow"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "ref"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 180
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "source"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "user"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^(pipelineUrl|webUrl)$"
+                },
+                "properties": [
+                  {
+                    "id": "custom.hidden",
+                    "value": true
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Сейчас · ${project}",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 13
+          }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Running",
+          "description": "Сейчас scope=running. Без фильтра времени.",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 14
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/pipelines",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  },
+                  {
+                    "key": "scope",
+                    "value": "running"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "name",
+                  "type": "string"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "source",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "created_at",
+                  "text": "created",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "updated_at",
+                  "text": "updated",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "coverage",
+                  "text": "coverage",
+                  "type": "string"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                }
+              ],
+              "filters": []
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "count"
+              ],
+              "fields": "/^id$/",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "blue",
+                    "value": 1
+                  },
+                  {
+                    "color": "orange",
+                    "value": 5
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Failed",
+          "description": "Пайплайны status=failed в выбранном окне (до 100).",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 4,
+            "y": 14
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/pipelines",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  },
+                  {
+                    "key": "updated_after",
+                    "value": "${__from:date:iso}"
+                  },
+                  {
+                    "key": "updated_before",
+                    "value": "${__to:date:iso}"
+                  },
+                  {
+                    "key": "order_by",
+                    "value": "updated_at"
+                  },
+                  {
+                    "key": "sort",
+                    "value": "desc"
+                  },
+                  {
+                    "key": "status",
+                    "value": "failed"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "name",
+                  "type": "string"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "source",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "created_at",
+                  "text": "created",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "updated_at",
+                  "text": "updated",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "coverage",
+                  "text": "coverage",
+                  "type": "string"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                }
+              ],
+              "filters": []
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "count"
+              ],
+              "fields": "/^id$/",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 3
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Success",
+          "description": "Пайплайны status=success в выбранном окне (до 100).",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 8,
+            "y": 14
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/pipelines",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  },
+                  {
+                    "key": "updated_after",
+                    "value": "${__from:date:iso}"
+                  },
+                  {
+                    "key": "updated_before",
+                    "value": "${__to:date:iso}"
+                  },
+                  {
+                    "key": "order_by",
+                    "value": "updated_at"
+                  },
+                  {
+                    "key": "sort",
+                    "value": "desc"
+                  },
+                  {
+                    "key": "status",
+                    "value": "success"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "name",
+                  "type": "string"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "source",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "created_at",
+                  "text": "created",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "updated_at",
+                  "text": "updated",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "coverage",
+                  "text": "coverage",
+                  "type": "string"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                }
+              ],
+              "filters": []
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "count"
+              ],
+              "fields": "/^id$/",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Failed jobs",
+          "description": "Последние failed jobs проекта (до 100).",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 12,
+            "y": 14
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/jobs",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  },
+                  {
+                    "key": "scope[]",
+                    "value": "failed"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "job",
+                  "type": "string"
+                },
+                {
+                  "selector": "stage",
+                  "text": "stage",
+                  "type": "string"
+                },
+                {
+                  "selector": "pipeline.id",
+                  "text": "pipeline",
+                  "type": "number"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "failure_reason",
+                  "text": "reason",
+                  "type": "string"
+                },
+                {
+                  "selector": "allow_failure",
+                  "text": "allow_failure",
+                  "type": "boolean"
+                },
+                {
+                  "selector": "runner.description",
+                  "text": "runner",
+                  "type": "string"
+                },
+                {
+                  "selector": "commit.title",
+                  "text": "commit",
+                  "type": "string"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "started_at",
+                  "text": "started",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "finished_at",
+                  "text": "finished",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                },
+                {
+                  "selector": "pipeline.web_url",
+                  "text": "pipeline_url",
+                  "type": "string"
+                }
+              ],
+              "filters": []
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "count"
+              ],
+              "fields": "/^id$/",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 5
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Avg duration",
+          "description": "Средняя duration пайплайнов в окне (только с duration > 0).",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 16,
+            "y": 14
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/pipelines",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  },
+                  {
+                    "key": "updated_after",
+                    "value": "${__from:date:iso}"
+                  },
+                  {
+                    "key": "updated_before",
+                    "value": "${__to:date:iso}"
+                  },
+                  {
+                    "key": "order_by",
+                    "value": "updated_at"
+                  },
+                  {
+                    "key": "sort",
+                    "value": "desc"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "name",
+                  "type": "string"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "source",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "created_at",
+                  "text": "created",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "updated_at",
+                  "text": "updated",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "coverage",
+                  "text": "coverage",
+                  "type": "string"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                }
+              ],
+              "filters": [],
+              "filterExpression": "duration > 0"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "/^duration$/",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "unit": "s",
+              "noValue": "—",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 300
+                  },
+                  {
+                    "color": "orange",
+                    "value": 900
+                  },
+                  {
+                    "color": "red",
+                    "value": 1800
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "CI queue",
+          "description": "gitlab_ci_current_queue_size на gitlab.corp.example. Job'ы ждут runner.",
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 20,
+            "y": 14
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(gitlab_ci_current_queue_size{job=\"gitlab\"}) or vector(0)",
+              "legendFormat": "queue"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "textMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "noValue": "0",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 5
+                  },
+                  {
+                    "color": "red",
+                    "value": 15
+                  }
+                ]
+              },
+              "links": [
+                {
+                  "title": "GitLab infra",
+                  "url": "/d/gitlab",
+                  "targetBlank": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": 8,
+          "type": "row",
+          "title": "Нужно внимание · ${project}",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 18
+          }
+        },
+        {
+          "id": 9,
+          "type": "table",
+          "title": "Running / pending / failed",
+          "description": "Jobs в failed, running, pending, waiting_for_resource, manual. Клик по job — GitLab.",
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 19
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/jobs",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  },
+                  {
+                    "key": "scope[]",
+                    "value": "failed"
+                  },
+                  {
+                    "key": "scope[]",
+                    "value": "running"
+                  },
+                  {
+                    "key": "scope[]",
+                    "value": "pending"
+                  },
+                  {
+                    "key": "scope[]",
+                    "value": "waiting_for_resource"
+                  },
+                  {
+                    "key": "scope[]",
+                    "value": "manual"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "job",
+                  "type": "string"
+                },
+                {
+                  "selector": "stage",
+                  "text": "stage",
+                  "type": "string"
+                },
+                {
+                  "selector": "pipeline.id",
+                  "text": "pipeline",
+                  "type": "number"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "failure_reason",
+                  "text": "reason",
+                  "type": "string"
+                },
+                {
+                  "selector": "allow_failure",
+                  "text": "allow_failure",
+                  "type": "boolean"
+                },
+                {
+                  "selector": "runner.description",
+                  "text": "runner",
+                  "type": "string"
+                },
+                {
+                  "selector": "commit.title",
+                  "text": "commit",
+                  "type": "string"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "started_at",
+                  "text": "started",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "finished_at",
+                  "text": "finished",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                },
+                {
+                  "selector": "pipeline.web_url",
+                  "text": "pipeline_url",
+                  "type": "string"
+                }
+              ],
+              "filters": []
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "countRows": true,
+              "reducer": [
+                "count"
+              ]
+            },
+            "sortBy": [
+              {
+                "displayName": "started",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "filterByValue",
+              "options": {
+                "filters": [
+                  {
+                    "fieldName": "status",
+                    "config": {
+                      "id": "regex",
+                      "options": {
+                        "value": "^${status}$"
+                      }
+                    }
+                  }
+                ],
+                "type": "include",
+                "match": "all"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true,
+                "align": "left"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "status"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "solid"
+                    }
+                  },
+                  {
+                    "id": "custom.filterable",
+                    "value": true
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "created": {
+                            "text": "created",
+                            "color": "yellow"
+                          },
+                          "waiting_for_resource": {
+                            "text": "waiting",
+                            "color": "orange"
+                          },
+                          "preparing": {
+                            "text": "preparing",
+                            "color": "blue"
+                          },
+                          "pending": {
+                            "text": "pending",
+                            "color": "yellow"
+                          },
+                          "running": {
+                            "text": "running",
+                            "color": "blue"
+                          },
+                          "success": {
+                            "text": "success",
+                            "color": "green"
+                          },
+                          "failed": {
+                            "text": "failed",
+                            "color": "red"
+                          },
+                          "canceling": {
+                            "text": "canceling",
+                            "color": "purple"
+                          },
+                          "canceled": {
+                            "text": "canceled",
+                            "color": "purple"
+                          },
+                          "skipped": {
+                            "text": "skipped",
+                            "color": "text"
+                          },
+                          "manual": {
+                            "text": "manual",
+                            "color": "orange"
+                          },
+                          "scheduled": {
+                            "text": "scheduled",
+                            "color": "blue"
+                          },
+                          "waiting_for_callback": {
+                            "text": "callback",
+                            "color": "orange"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "id"
+                },
+                "properties": [
+                  {
+                    "id": "custom.hidden",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "job"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Job",
+                        "url": "${__data.fields.web_url}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "pipeline"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Pipeline",
+                        "url": "${__data.fields.pipeline_url}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "duration"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "yellow",
+                          "value": 300
+                        },
+                        {
+                          "color": "orange",
+                          "value": 900
+                        },
+                        {
+                          "color": "red",
+                          "value": 1800
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "queued"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "yellow",
+                          "value": 300
+                        },
+                        {
+                          "color": "orange",
+                          "value": 900
+                        },
+                        {
+                          "color": "red",
+                          "value": 1800
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "started"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "dateTimeFromNow"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "finished"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "dateTimeFromNow"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "stage"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "ref"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 160
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "runner"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 160
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "user"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "reason"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 180
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "solid"
+                    }
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "script_failure": {
+                            "color": "red"
+                          },
+                          "runner_system_failure": {
+                            "color": "orange"
+                          },
+                          "stuck_or_timeout_failure": {
+                            "color": "orange"
+                          },
+                          "job_execution_timeout": {
+                            "color": "orange"
+                          },
+                          "api_failure": {
+                            "color": "orange"
+                          },
+                          "unknown_failure": {
+                            "color": "red"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^(web_url|pipeline_url)$"
+                },
+                "properties": [
+                  {
+                    "id": "custom.hidden",
+                    "value": true
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 10,
+          "type": "row",
+          "title": "Пайплайны · ${project}",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 28
+          }
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "Пайплайны · ${project}",
+          "description": "updated_at в окне дашборда, до 100. Клик по id — GitLab.",
+          "gridPos": {
+            "h": 12,
+            "w": 16,
+            "x": 0,
+            "y": 29
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/pipelines",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  },
+                  {
+                    "key": "updated_after",
+                    "value": "${__from:date:iso}"
+                  },
+                  {
+                    "key": "updated_before",
+                    "value": "${__to:date:iso}"
+                  },
+                  {
+                    "key": "order_by",
+                    "value": "updated_at"
+                  },
+                  {
+                    "key": "sort",
+                    "value": "desc"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "name",
+                  "type": "string"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "source",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "created_at",
+                  "text": "created",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "updated_at",
+                  "text": "updated",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "coverage",
+                  "text": "coverage",
+                  "type": "string"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                }
+              ],
+              "filters": []
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "countRows": true,
+              "reducer": [
+                "count"
+              ]
+            },
+            "sortBy": [
+              {
+                "displayName": "updated",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "filterByValue",
+              "options": {
+                "filters": [
+                  {
+                    "fieldName": "status",
+                    "config": {
+                      "id": "regex",
+                      "options": {
+                        "value": "^${status}$"
+                      }
+                    }
+                  }
+                ],
+                "type": "include",
+                "match": "all"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true,
+                "align": "left"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "status"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "solid"
+                    }
+                  },
+                  {
+                    "id": "custom.filterable",
+                    "value": true
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "created": {
+                            "text": "created",
+                            "color": "yellow"
+                          },
+                          "waiting_for_resource": {
+                            "text": "waiting",
+                            "color": "orange"
+                          },
+                          "preparing": {
+                            "text": "preparing",
+                            "color": "blue"
+                          },
+                          "pending": {
+                            "text": "pending",
+                            "color": "yellow"
+                          },
+                          "running": {
+                            "text": "running",
+                            "color": "blue"
+                          },
+                          "success": {
+                            "text": "success",
+                            "color": "green"
+                          },
+                          "failed": {
+                            "text": "failed",
+                            "color": "red"
+                          },
+                          "canceling": {
+                            "text": "canceling",
+                            "color": "purple"
+                          },
+                          "canceled": {
+                            "text": "canceled",
+                            "color": "purple"
+                          },
+                          "skipped": {
+                            "text": "skipped",
+                            "color": "text"
+                          },
+                          "manual": {
+                            "text": "manual",
+                            "color": "orange"
+                          },
+                          "scheduled": {
+                            "text": "scheduled",
+                            "color": "blue"
+                          },
+                          "waiting_for_callback": {
+                            "text": "callback",
+                            "color": "orange"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "id"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "pipeline"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Pipeline",
+                        "url": "${__data.fields.web_url}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "ref"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Commits",
+                        "url": "https://gitlab.corp.example/${project}/-/commits/${__value.text}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "duration"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "yellow",
+                          "value": 300
+                        },
+                        {
+                          "color": "orange",
+                          "value": 900
+                        },
+                        {
+                          "color": "red",
+                          "value": 1800
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "queued"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "yellow",
+                          "value": 300
+                        },
+                        {
+                          "color": "orange",
+                          "value": 900
+                        },
+                        {
+                          "color": "red",
+                          "value": 1800
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "created"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "dateTimeFromNow"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "updated"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "dateTimeFromNow"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "source"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "user"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "coverage"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 90
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "name"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 180
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^(web_url)$"
+                },
+                "properties": [
+                  {
+                    "id": "custom.hidden",
+                    "value": true
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 12,
+          "type": "piechart",
+          "title": "Статусы пайплайнов",
+          "description": "Доля статусов в том же окне, что таблица слева.",
+          "gridPos": {
+            "h": 12,
+            "w": 8,
+            "x": 16,
+            "y": 29
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/pipelines",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  },
+                  {
+                    "key": "updated_after",
+                    "value": "${__from:date:iso}"
+                  },
+                  {
+                    "key": "updated_before",
+                    "value": "${__to:date:iso}"
+                  },
+                  {
+                    "key": "order_by",
+                    "value": "updated_at"
+                  },
+                  {
+                    "key": "sort",
+                    "value": "desc"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "name",
+                  "type": "string"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "source",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "created_at",
+                  "text": "created",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "updated_at",
+                  "text": "updated",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "coverage",
+                  "text": "coverage",
+                  "type": "string"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                }
+              ],
+              "filters": [],
+              "summarizeExpression": "count(id)",
+              "summarizeAlias": "count",
+              "summarizeBy": "status"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "filterByValue",
+              "options": {
+                "filters": [
+                  {
+                    "fieldName": "status",
+                    "config": {
+                      "id": "regex",
+                      "options": {
+                        "value": "^${status}$"
+                      }
+                    }
+                  }
+                ],
+                "type": "include",
+                "match": "all"
+              }
+            }
+          ],
+          "options": {
+            "pieType": "donut",
+            "displayLabels": [
+              "percent"
+            ],
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "values": [
+                "value",
+                "percent"
+              ],
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            },
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 0,
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "created": {
+                      "text": "created",
+                      "color": "yellow"
+                    },
+                    "waiting_for_resource": {
+                      "text": "waiting",
+                      "color": "orange"
+                    },
+                    "preparing": {
+                      "text": "preparing",
+                      "color": "blue"
+                    },
+                    "pending": {
+                      "text": "pending",
+                      "color": "yellow"
+                    },
+                    "running": {
+                      "text": "running",
+                      "color": "blue"
+                    },
+                    "success": {
+                      "text": "success",
+                      "color": "green"
+                    },
+                    "failed": {
+                      "text": "failed",
+                      "color": "red"
+                    },
+                    "canceling": {
+                      "text": "canceling",
+                      "color": "purple"
+                    },
+                    "canceled": {
+                      "text": "canceled",
+                      "color": "purple"
+                    },
+                    "skipped": {
+                      "text": "skipped",
+                      "color": "text"
+                    },
+                    "manual": {
+                      "text": "manual",
+                      "color": "orange"
+                    },
+                    "scheduled": {
+                      "text": "scheduled",
+                      "color": "blue"
+                    },
+                    "waiting_for_callback": {
+                      "text": "callback",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": 13,
+          "type": "row",
+          "title": "Джобы · ${project}",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 41
+          }
+        },
+        {
+          "id": 14,
+          "type": "table",
+          "title": "Джобы · ${project}",
+          "description": "Последние jobs проекта (до 100). API без updated_after — это последние, не строго окно дашборда.",
+          "gridPos": {
+            "h": 14,
+            "w": 16,
+            "x": 0,
+            "y": 42
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/jobs",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "job",
+                  "type": "string"
+                },
+                {
+                  "selector": "stage",
+                  "text": "stage",
+                  "type": "string"
+                },
+                {
+                  "selector": "pipeline.id",
+                  "text": "pipeline",
+                  "type": "number"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "failure_reason",
+                  "text": "reason",
+                  "type": "string"
+                },
+                {
+                  "selector": "allow_failure",
+                  "text": "allow_failure",
+                  "type": "boolean"
+                },
+                {
+                  "selector": "runner.description",
+                  "text": "runner",
+                  "type": "string"
+                },
+                {
+                  "selector": "commit.title",
+                  "text": "commit",
+                  "type": "string"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "started_at",
+                  "text": "started",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "finished_at",
+                  "text": "finished",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                },
+                {
+                  "selector": "pipeline.web_url",
+                  "text": "pipeline_url",
+                  "type": "string"
+                }
+              ],
+              "filters": []
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "countRows": true,
+              "reducer": [
+                "count"
+              ]
+            },
+            "sortBy": [
+              {
+                "displayName": "started",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "filterByValue",
+              "options": {
+                "filters": [
+                  {
+                    "fieldName": "status",
+                    "config": {
+                      "id": "regex",
+                      "options": {
+                        "value": "^${status}$"
+                      }
+                    }
+                  }
+                ],
+                "type": "include",
+                "match": "all"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true,
+                "align": "left"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "status"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "solid"
+                    }
+                  },
+                  {
+                    "id": "custom.filterable",
+                    "value": true
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "created": {
+                            "text": "created",
+                            "color": "yellow"
+                          },
+                          "waiting_for_resource": {
+                            "text": "waiting",
+                            "color": "orange"
+                          },
+                          "preparing": {
+                            "text": "preparing",
+                            "color": "blue"
+                          },
+                          "pending": {
+                            "text": "pending",
+                            "color": "yellow"
+                          },
+                          "running": {
+                            "text": "running",
+                            "color": "blue"
+                          },
+                          "success": {
+                            "text": "success",
+                            "color": "green"
+                          },
+                          "failed": {
+                            "text": "failed",
+                            "color": "red"
+                          },
+                          "canceling": {
+                            "text": "canceling",
+                            "color": "purple"
+                          },
+                          "canceled": {
+                            "text": "canceled",
+                            "color": "purple"
+                          },
+                          "skipped": {
+                            "text": "skipped",
+                            "color": "text"
+                          },
+                          "manual": {
+                            "text": "manual",
+                            "color": "orange"
+                          },
+                          "scheduled": {
+                            "text": "scheduled",
+                            "color": "blue"
+                          },
+                          "waiting_for_callback": {
+                            "text": "callback",
+                            "color": "orange"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "id"
+                },
+                "properties": [
+                  {
+                    "id": "custom.hidden",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "job"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Job",
+                        "url": "${__data.fields.web_url}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "pipeline"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Pipeline",
+                        "url": "${__data.fields.pipeline_url}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "duration"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "yellow",
+                          "value": 300
+                        },
+                        {
+                          "color": "orange",
+                          "value": 900
+                        },
+                        {
+                          "color": "red",
+                          "value": 1800
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "queued"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "yellow",
+                          "value": 300
+                        },
+                        {
+                          "color": "orange",
+                          "value": 900
+                        },
+                        {
+                          "color": "red",
+                          "value": 1800
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "started"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "dateTimeFromNow"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "finished"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "dateTimeFromNow"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "stage"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "ref"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 160
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "runner"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 160
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "user"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 120
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "reason"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 180
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background",
+                      "mode": "solid"
+                    }
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "script_failure": {
+                            "color": "red"
+                          },
+                          "runner_system_failure": {
+                            "color": "orange"
+                          },
+                          "stuck_or_timeout_failure": {
+                            "color": "orange"
+                          },
+                          "job_execution_timeout": {
+                            "color": "orange"
+                          },
+                          "api_failure": {
+                            "color": "orange"
+                          },
+                          "unknown_failure": {
+                            "color": "red"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^(web_url|pipeline_url)$"
+                },
+                "properties": [
+                  {
+                    "id": "custom.hidden",
+                    "value": true
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "commit"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 280
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "allow_failure"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 110
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 15,
+          "type": "piechart",
+          "title": "Статусы jobs",
+          "description": "Доля статусов последних jobs проекта.",
+          "gridPos": {
+            "h": 14,
+            "w": 8,
+            "x": 16,
+            "y": 42
+          },
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "${gitlab}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "type": "json",
+              "source": "url",
+              "format": "table",
+              "parser": "backend",
+              "url": "https://gitlab.corp.example/api/v4/projects/${project:percentencode}/jobs",
+              "url_options": {
+                "method": "GET",
+                "data": "",
+                "headers": [],
+                "params": [
+                  {
+                    "key": "per_page",
+                    "value": "100"
+                  }
+                ]
+              },
+              "root_selector": "",
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "id",
+                  "type": "number"
+                },
+                {
+                  "selector": "status",
+                  "text": "status",
+                  "type": "string"
+                },
+                {
+                  "selector": "name",
+                  "text": "job",
+                  "type": "string"
+                },
+                {
+                  "selector": "stage",
+                  "text": "stage",
+                  "type": "string"
+                },
+                {
+                  "selector": "pipeline.id",
+                  "text": "pipeline",
+                  "type": "number"
+                },
+                {
+                  "selector": "ref",
+                  "text": "ref",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration",
+                  "text": "duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "queued_duration",
+                  "text": "queued",
+                  "type": "number"
+                },
+                {
+                  "selector": "failure_reason",
+                  "text": "reason",
+                  "type": "string"
+                },
+                {
+                  "selector": "allow_failure",
+                  "text": "allow_failure",
+                  "type": "boolean"
+                },
+                {
+                  "selector": "runner.description",
+                  "text": "runner",
+                  "type": "string"
+                },
+                {
+                  "selector": "commit.title",
+                  "text": "commit",
+                  "type": "string"
+                },
+                {
+                  "selector": "user.username",
+                  "text": "user",
+                  "type": "string"
+                },
+                {
+                  "selector": "started_at",
+                  "text": "started",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "finished_at",
+                  "text": "finished",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "web_url",
+                  "text": "web_url",
+                  "type": "string"
+                },
+                {
+                  "selector": "pipeline.web_url",
+                  "text": "pipeline_url",
+                  "type": "string"
+                }
+              ],
+              "filters": [],
+              "summarizeExpression": "count(id)",
+              "summarizeAlias": "count",
+              "summarizeBy": "status"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "filterByValue",
+              "options": {
+                "filters": [
+                  {
+                    "fieldName": "status",
+                    "config": {
+                      "id": "regex",
+                      "options": {
+                        "value": "^${status}$"
+                      }
+                    }
+                  }
+                ],
+                "type": "include",
+                "match": "all"
+              }
+            }
+          ],
+          "options": {
+            "pieType": "donut",
+            "displayLabels": [
+              "percent"
+            ],
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "values": [
+                "value",
+                "percent"
+              ],
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            },
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 0,
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "created": {
+                      "text": "created",
+                      "color": "yellow"
+                    },
+                    "waiting_for_resource": {
+                      "text": "waiting",
+                      "color": "orange"
+                    },
+                    "preparing": {
+                      "text": "preparing",
+                      "color": "blue"
+                    },
+                    "pending": {
+                      "text": "pending",
+                      "color": "yellow"
+                    },
+                    "running": {
+                      "text": "running",
+                      "color": "blue"
+                    },
+                    "success": {
+                      "text": "success",
+                      "color": "green"
+                    },
+                    "failed": {
+                      "text": "failed",
+                      "color": "red"
+                    },
+                    "canceling": {
+                      "text": "canceling",
+                      "color": "purple"
+                    },
+                    "canceled": {
+                      "text": "canceled",
+                      "color": "purple"
+                    },
+                    "skipped": {
+                      "text": "skipped",
+                      "color": "text"
+                    },
+                    "manual": {
+                      "text": "manual",
+                      "color": "orange"
+                    },
+                    "scheduled": {
+                      "text": "scheduled",
+                      "color": "blue"
+                    },
+                    "waiting_for_callback": {
+                      "text": "callback",
+                      "color": "orange"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
