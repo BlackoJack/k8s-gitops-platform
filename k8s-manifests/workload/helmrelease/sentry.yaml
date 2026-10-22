@@ -128,7 +128,8 @@ spec:
       httpPort: 8123
       database: sentry
       username: sentry
-      password: "REDACTED"
+      existingSecret: external-clickhouse
+      existingSecretKey: password
       singleNode: true
       clusterName: default
 

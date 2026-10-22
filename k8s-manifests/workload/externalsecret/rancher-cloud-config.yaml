@@ -1,0 +1,21 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: rancher-cloud-config
+  namespace: kube-system
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: openbao
+  target:
+    name: rancher-cloud-config
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: Opaque
+  data:
+    - secretKey: "config.yaml"
+      remoteRef:
+        key: workload/kube-system/rancher-cloud-config
+        property: "config.yaml"

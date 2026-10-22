@@ -1,0 +1,31 @@
+# OpenBao runs outside the cluster and checks service account tokens via
+# TokenReview. This account only holds system:auth-delegator. The JWT itself
+# stays in the cluster; OpenBao stores a copy in auth/kubernetes-workload/config.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-reviewer
+  namespace: external-secrets
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openbao-reviewer-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: openbao-reviewer
+    namespace: external-secrets
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openbao-reviewer-token
+  namespace: external-secrets
+  annotations:
+    kubernetes.io/service-account.name: openbao-reviewer
+type: kubernetes.io/service-account-token

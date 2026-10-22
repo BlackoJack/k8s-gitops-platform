@@ -1,0 +1,21 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: selectel-api-key
+  namespace: cert-manager
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: openbao
+  target:
+    name: selectel-api-key
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: Opaque
+  data:
+    - secretKey: token
+      remoteRef:
+        key: workload/cert-manager/selectel-api-key
+        property: token

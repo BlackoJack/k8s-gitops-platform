@@ -1,0 +1,25 @@
+# Grafana sidecar loads this datasource because of grafana_datasource=1.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: grafana-datasource-gitlab
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: openbao
+  target:
+    name: grafana-datasource-gitlab
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: Opaque
+      metadata:
+        labels:
+          grafana_datasource: "1"
+  data:
+    - secretKey: "gitlab.yaml"
+      remoteRef:
+        key: workload/monitoring/grafana-datasource-gitlab
+        property: "gitlab.yaml"

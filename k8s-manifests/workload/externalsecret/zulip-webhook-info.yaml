@@ -1,0 +1,21 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: zulip-webhook-info
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: openbao
+  target:
+    name: zulip-webhook-info
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: Opaque
+  data:
+    - secretKey: url
+      remoteRef:
+        key: workload/monitoring/zulip-webhook-info
+        property: url

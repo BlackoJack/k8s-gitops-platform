@@ -1,0 +1,20 @@
+# KV paths look like management/<namespace>/<secret-name> on mount `k8s`.
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: openbao
+spec:
+  provider:
+    vault:
+      server: https://bao.corp.example:8200
+      path: k8s
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: kubernetes-management
+          role: external-secrets
+          serviceAccountRef:
+            name: external-secrets
+            namespace: external-secrets
+            audiences:
+              - vault

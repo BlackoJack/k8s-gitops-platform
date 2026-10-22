@@ -1,0 +1,29 @@
+# MinIO chart reads rootUser and rootPassword from this Secret.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: minio-root
+  namespace: minio
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: openbao
+  target:
+    name: minio-root
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: Opaque
+      metadata:
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+  data:
+    - secretKey: rootUser
+      remoteRef:
+        key: management/minio/minio-root
+        property: rootUser
+    - secretKey: rootPassword
+      remoteRef:
+        key: management/minio/minio-root
+        property: rootPassword

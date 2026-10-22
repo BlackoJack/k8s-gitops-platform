@@ -1,0 +1,30 @@
+# Grafana admin login. Data lives in OpenBao at k8s/workload/monitoring/grafana-admin.
+# The label keeps the VictoriaMetrics HelmRelease watching this Secret.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: grafana-admin
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: openbao
+  target:
+    name: grafana-admin
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: Opaque
+      metadata:
+        labels:
+          reconcile.fluxcd.io/watch: Enabled
+  data:
+    - secretKey: admin-user
+      remoteRef:
+        key: workload/monitoring/grafana-admin
+        property: admin-user
+    - secretKey: admin-password
+      remoteRef:
+        key: workload/monitoring/grafana-admin
+        property: admin-password

@@ -9,7 +9,7 @@ Anonymized portfolio copy of a production platform: two RKE2 clusters, Flux as t
 
 Два кластера Kubernetes. Что лежит в git — то и должно быть в кластере. Flux на каждом кластере раз в минуту забирает репозиторий и сам применяет diff. `kubectl` — для отладки, не для установки.
 
-> Это обезличенная копия для портфолио. Её нельзя применять к кластеру как есть: секреты заменены на `REDACTED`, домены и адреса примерные. Сгенерированные CRD Flux и черновики `*.yaml_bak` убраны.
+> Это обезличенная копия для портфолио. Её нельзя применять к кластеру как есть: домены и адреса примерные, содержимого OpenBao здесь нет. Значения, которые ещё лежат прямо в values чарта, заменены на `REDACTED`. Сгенерированные CRD Flux и черновики `*.yaml_bak` убраны.
 
 ```mermaid
 flowchart TB
@@ -17,7 +17,7 @@ flowchart TB
   git --> fluxM["Flux · management"]
   git --> fluxW["Flux · workload"]
   fluxM --> mgmt["management<br/>Rancher, MinIO, сертификаты"]
-  mgmt -->|"создаёт и держит"| work["workload<br/>приложения, CI, мониторинг, политики"]
+  mgmt -->|"провижинит"| work["workload<br/>приложения, CI, мониторинг, политики"]
   fluxW --> work
   mgmt -->|"remote write"| vm["VictoriaMetrics<br/>на workload"]
 ```
@@ -48,6 +48,7 @@ Management свой Grafana не поднимает. vmagent снимает ло
 | Если интересно | Откройте |
 | --- | --- |
 | Что установлено | `k8s-manifests/workload/helmrelease/` |
+| Как секреты попадают в кластер | `k8s-manifests/workload/externalsecret/` и `clustersecretstore/` |
 | Сеть, DNS, ingress | `k8s-manifests/*/helmsconfig/` |
 | Как management описывает рабочий кластер | `k8s-manifests/management/cluster/` |
 | Политики | `platform-security/policies/` |
@@ -80,8 +81,9 @@ Management свой Grafana не поднимает. vmagent снимает ло
 | --- | --- |
 | `clusterissuers/` | Два ACME DNS-01: публичный DNS-провайдер и внутренний Technitium. |
 | `certs/` | Wildcard-сертификаты `*.msk.corp.example` и `*.corp.example`, плюс отдельный сертификат Rancher. |
-| `secrets/` | Имена секретов и ключи, по которым их находят чарты. Значения в этой копии — заглушки. |
-| `sa/` | ServiceAccount и RBAC. `gitlab-ci` на workload — executor для раннеров. |
+| `clustersecretstore/` | Откуда External Secrets читает значения. Здесь OpenBao и Kubernetes auth. |
+| `externalsecret/` | Какой ключ в OpenBao становится каким Secret. В git путь и имя поля, не само значение. |
+| `sa/` | ServiceAccount и RBAC. `gitlab-ci` на workload — executor для раннеров. `openbao-reviewer` нужен OpenBao только для TokenReview. |
 
 ### Изоляция
 
@@ -131,6 +133,7 @@ Admission-controller Down — critical. У webhook `failurePolicy=Fail`: есл�
 **Оба кластера**
 
 - cert-manager и webhook'и для публичного и внутреннего DNS
+- External Secrets: Secret в кластере собирается из OpenBao, в git значения нет
 - CSI NFS
 - GitLab Agent
 - VictoriaMetrics: на workload стек целиком, на management только vmagent
@@ -152,7 +155,7 @@ Admission-controller Down — critical. У webhook `failurePolicy=Fail`: есл�
 - Kyverno и Policy Reporter
 - descheduler и overprovisioning, чтобы на нодах оставался запас под всплеск
 
-Новый сервис обычно состоит из namespace в `ns/`, HelmRepository, если чарта ещё нет, и HelmRelease. Сертификат и секрет — рядом, в своих папках. Kyverno сразу начинает Audit: нет requests, проб или non-root — в отчёте будет fail. Дальше либо правится чарт, либо добавляется узкое исключение.
+Новый сервис обычно состоит из namespace в `ns/`, HelmRepository, если чарта ещё нет, и HelmRelease. Сертификат — в `certs/`. Секрет — `ExternalSecret` на тот же OpenBao: путь `workload/<namespace>/<имя>` или `management/<namespace>/<имя>`. Kyverno сразу начинает Audit: нет requests, проб или non-root — в отчёте будет fail. Дальше либо правится чарт, либо добавляется узкое исключение.
 
 ## Как меняется кластер
 
@@ -170,7 +173,9 @@ Values в git важнее того, что когда-то поставили �
 
 ## Чего в этой копии нет
 
-- значений секретов, токенов, паролей и приватного материала сертификатов
+- содержимого OpenBao: в git только пути и имена ключей
+- значений, которые ещё прописаны в values чарта: в этой копии они `REDACTED`
+- приватного материала сертификатов
 - настоящих имён, доменов, адресов и идентификаторов чатов
 - `gotk-components.yaml` — это сгенерированные CRD и контроллеры Flux, десятки тысяч строк апстрима
 - черновиков `*.yaml_bak`

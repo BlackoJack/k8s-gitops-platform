@@ -38,8 +38,15 @@ spec:
         cpu: 2
         memory: 4Gi
 
-    rootUser: minioadmin
-    rootPassword: "REDACTED"
+    existingSecret: minio-root
+    # quay.io answers 401 for RELEASE.2024-12-18T13-15-44Z. The image is
+    # already on this node; any other node fails the pull.
+    nodeSelector:
+      kubernetes.io/hostname: k8s-management-2
+    # Chart default creates a console user via a post-upgrade Job that pulls
+    # quay.io/minio/mc, which also returns 401. Empty list skips that Job.
+    # The user from the original install stays.
+    users: []
 
     ingress:
       enabled: true
